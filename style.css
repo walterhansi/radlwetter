@@ -1,0 +1,144 @@
+/* Radlwetter – Farbwelt wie aoSPIN: Anthrazit, Flächen, kräftige Akzente */
+:root {
+  --bg: #131419;
+  --flaeche: #1d1f27;
+  --blau: #1f4f96;       /* Fläche des Wetters */
+  --tafel: #1a437f;      /* Tafel etwas dunkler */
+  --tafel-jetzt: #245aa8;
+  --linie: rgba(255, 255, 255, .14);
+  --text: #ffffff;
+  --text-leise: #c9d6ee;
+  --orange: #f9a73b;
+  --sonne: #ffd23f;
+  --gruen: #3fbf7a;
+  --gruen-dunkel: #0b6b3a;
+  --gelb: #f4c430;
+  --rot: #cc2d3f;
+  --radius: 20px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+main, .kopf, .fuss { width: 100%; max-width: 1280px; margin-inline: auto; }
+
+/* Kopf */
+.kopf { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.kopf h1 { margin: 0; font-size: 1.5rem; display: flex; align-items: center; gap: 10px; letter-spacing: .2px; }
+.logo { width: 44px; height: 28px; color: var(--orange); flex: none; }
+.kopf-rechts { display: flex; align-items: center; gap: 8px; }
+.chip, .rund {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--flaeche); color: var(--text);
+  border: 1px solid var(--linie); border-radius: 999px;
+  font: inherit; cursor: pointer; min-height: 44px;
+}
+.chip { padding: 0 16px 0 12px; }
+.rund { width: 44px; justify-content: center; }
+.chip svg, .rund svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chip:hover, .rund:hover, .chip:focus-visible, .rund:focus-visible { border-color: var(--orange); outline: none; }
+.rund.dreht svg { animation: dreh 0.9s linear infinite; }
+@keyframes dreh { to { transform: rotate(360deg); } }
+
+/* Fläche mit Tabelle */
+.flaeche { background: var(--blau); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.fenster { margin: 0; padding: 0 4px; font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.fenster b { color: var(--sonne); }
+
+.rahmen { overflow-x: auto; border-radius: 14px; background: var(--tafel); -webkit-overflow-scrolling: touch; }
+.rahmen:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+table { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 0 8px; height: 44px; min-width: 56px; text-align: center; white-space: nowrap; border-bottom: 1px solid var(--linie); }
+tr:last-child > * { border-bottom: 0; }
+
+/* erste Spalte: Zeilenbeschriftung, bleibt beim Verschieben stehen */
+th[scope="row"], thead th:first-child {
+  position: sticky; left: 0; z-index: 2;
+  background: var(--tafel);
+  min-width: 108px; text-align: left; padding-left: 12px; padding-right: 10px;
+  font-weight: 600; box-shadow: 1px 0 0 var(--linie);
+}
+.lbl { display: inline-flex; align-items: center; gap: 6px; }
+.lbl .u { color: var(--text-leise); font-weight: 500; font-size: .85em; }
+.lbl svg { width: 22px; height: 22px; flex: none; }
+.lbl .sonne { color: var(--sonne); }
+
+/* wichtigste Zeile: Rennrad / Eignung */
+tr.eignung > * { height: 56px; background: rgba(0, 0, 0, .18); border-bottom: 2px solid rgba(255, 255, 255, .28); }
+tr.eignung th[scope="row"] { background: #163a70; }
+.lbl svg.rad { width: 52px; height: 33px; color: var(--orange); display: block; }
+
+/* Kopfzeilen (Tag, Stunde) */
+thead th { font-weight: 700; color: var(--text); }
+thead tr.tage th { height: 34px; font-size: .85rem; color: var(--text-leise); text-align: left; padding-left: 10px; letter-spacing: .3px; }
+thead tr.stunden th { font-size: 1.05rem; }
+.neuer-tag { border-left: 2px solid rgba(255, 255, 255, .45); }
+td.jetzt, th.jetzt { background: var(--tafel-jetzt); }
+tr.eignung td.jetzt { background: #2a67bb; }
+
+.pfeil { width: 16px; height: 16px; vertical-align: -3px; margin-left: 4px; fill: #fff; }
+td.leer { color: var(--text-leise); }
+td.nass { font-weight: 700; }
+
+/* Ampel */
+.amp {
+  display: inline-grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  vertical-align: middle;
+}
+.amp svg { width: 20px; height: 20px; fill: none; stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; }
+.amp.gruen { background: var(--gruen); } .amp.gruen svg { stroke: #062914; }
+.amp.top   { background: var(--gruen-dunkel); box-shadow: 0 0 0 3px #fff; } .amp.top svg { stroke: #fff; }
+.amp.gelb  { background: var(--gelb); } .amp.gelb svg { stroke: #2b2100; }
+.amp.rot   { background: var(--rot); } .amp.rot svg { stroke: #fff; }
+.legende .amp { width: 24px; height: 24px; margin-right: 8px; }
+.legende .amp svg { width: 14px; height: 14px; stroke-width: 3.6; }
+.legende .amp.top { box-shadow: 0 0 0 2px #fff; margin-left: 2px; margin-right: 10px; }
+
+.legende { list-style: none; margin: 0; padding: 0 4px; display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: .9rem; color: var(--text); }
+.legende li { display: flex; align-items: center; }
+.status { margin: 0; padding: 0 4px; font-size: .85rem; color: var(--text-leise); min-height: 1.2em; }
+.status.fehler { color: #fff; font-weight: 600; }
+
+/* Fuß */
+.fuss { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; color: #9aa3b5; font-size: .85rem; padding-bottom: 6px; }
+button.text { background: none; border: 0; color: #cdd6ea; font: inherit; text-decoration: underline; cursor: pointer; min-height: 44px; padding: 0 4px; }
+button.text:hover, button.text:focus-visible { color: #fff; outline: none; }
+
+/* Ortsdialog */
+dialog { background: var(--flaeche); color: var(--text); border: 1px solid var(--linie); border-radius: var(--radius); padding: 0; width: min(520px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.dlg { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.dlg h2 { margin: 0; font-size: 1.2rem; }
+.suche { display: flex; gap: 8px; }
+.suche input { flex: 1; min-width: 0; min-height: 44px; border-radius: 12px; border: 1px solid var(--linie); background: var(--bg); color: #fff; padding: 0 12px; font: inherit; }
+.suche input:focus-visible { outline: 2px solid var(--orange); }
+.knopf { min-height: 44px; border-radius: 12px; border: 1px solid var(--linie); background: var(--blau); color: #fff; padding: 0 14px; font: inherit; font-weight: 600; cursor: pointer; }
+.knopf.zu { background: transparent; }
+.knopf:hover, .knopf:focus-visible { border-color: #fff; outline: none; }
+.ortliste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow: auto; }
+.ortliste button { width: 100%; text-align: left; min-height: 44px; border-radius: 12px; border: 1px solid var(--linie); background: var(--bg); color: #fff; font: inherit; padding: 8px 12px; cursor: pointer; }
+.ortliste button:hover, .ortliste button:focus-visible { border-color: var(--orange); outline: none; }
+.ortliste small { color: #aab3c6; }
+.hinweis { margin: 0; min-height: 1.2em; color: #cdd6ea; font-size: .9rem; }
+.dlg-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 520px) {
+  .kopf h1 { font-size: 1.25rem; }
+  .logo { width: 38px; height: 24px; }
+  .flaeche { padding: 10px; }
+  th, td { padding: 0 6px; min-width: 50px; }
+  th[scope="row"], thead th:first-child { min-width: 92px; padding-left: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { .rund.dreht svg { animation: none; } }
