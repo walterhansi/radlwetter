@@ -19,6 +19,8 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
+.uhr { color: var(--text-leise); font-weight: 500; font-size: .85rem; }
 html { background: var(--bg); }
 body {
   margin: 0;
@@ -53,8 +55,29 @@ main, .kopf, .fuss { width: 100%; max-width: 1280px; margin-inline: auto; }
 
 /* Fläche mit Tabelle */
 .flaeche { background: var(--blau); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-.fenster { margin: 0; padding: 0 4px; font-size: 1.05rem; font-weight: 600; color: var(--text); }
-.fenster b { color: var(--sonne); }
+.kopfinfo { display: flex; flex-direction: column; gap: 10px; padding: 0 4px; }
+.kopfinfo p, .kopfinfo ul { margin: 0; }
+.regenausblick { display: flex; align-items: flex-start; gap: 8px; font-size: 1.1rem; }
+.regenausblick .ra-text { min-width: 0; }
+.regenausblick .ra-sym { margin-top: 1px; }
+.regenausblick b { font-weight: 700; }
+.regenausblick .quelle { color: var(--text-leise); font-size: .85rem; }
+.ra-sym { width: 22px; height: 22px; flex: none; }
+.regenausblick.trocken .ra-sym { color: var(--sonne); }
+.regenausblick.nass .ra-sym { color: #8fd0ff; }
+.fenster { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 10px; }
+.fenster li { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 6px 14px; border-radius: 18px; background: rgba(0, 0, 0, .22); font-size: 1rem; }
+.fenster li > *, .unsicherbox > * { white-space: nowrap; }
+.unsicherbox { display: inline-flex; align-items: center; gap: 6px; }
+.fenster li .tag { color: var(--text-leise); font-weight: 600; }
+.fenster li b { color: var(--sonne); font-size: 1.08rem; }
+.fenster li .dauerf, .fenster li .unsicher-text { color: var(--text-leise); font-size: .9rem; }
+.fenster li.keins .keinfenster { color: var(--text-leise); }
+.fenster li .badge.inline { align-self: center; }
+.modellhinweis { font-size: .95rem; color: var(--text-leise); }
+.modellhinweis.warn { color: #fff; }
+.modellhinweis.warn b { color: var(--sonne); }
+.modellhinweis .badge.inline { margin-right: 6px; vertical-align: 1px; }
 
 .rahmen { overflow-x: auto; border-radius: 14px; background: var(--tafel); -webkit-overflow-scrolling: touch; }
 .rahmen:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -75,7 +98,42 @@ th[scope="row"], thead th:first-child {
 .lbl .sonne { color: var(--sonne); }
 
 /* wichtigste Zeile: Rennrad / Eignung */
-tr.eignung > * { height: 56px; background: rgba(0, 0, 0, .18); border-bottom: 2px solid rgba(255, 255, 255, .28); }
+tr.eignung > * { height: 78px; background: rgba(0, 0, 0, .18); border-bottom: 2px solid rgba(255, 255, 255, .28); }
+tr.regendauer > * { height: 56px; }
+
+/* Ampel mit Ursachen-Symbolen darunter und Unsicherheits-Marke */
+.ampelbox { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ampelwrap { position: relative; display: inline-block; line-height: 0; }
+.gruende { display: flex; gap: 3px; height: 16px; align-items: center; justify-content: center; }
+.gruende svg { width: 16px; height: 16px; color: #fff; }
+.badge {
+  display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; color: #1b1b1b; font: 800 12px/1 system-ui, sans-serif;
+}
+.ampelwrap .badge { position: absolute; top: -7px; right: -9px; box-shadow: 0 0 0 2px #163a70; }
+.badge.demo { margin-right: 8px; }
+.badge.inline { width: 20px; height: 20px; font-size: 13px; background: var(--sonne); }
+.gruende-demo { display: inline-flex; gap: 2px; margin-right: 8px; }
+.gruende-demo svg { width: 16px; height: 16px; color: #fff; }
+
+/* Zahlen, die ihre Grenze überschreiten: gelbe/rote Marke wie die Ampel */
+.flag { display: inline-block; min-width: 34px; padding: 3px 8px; border-radius: 999px; font-weight: 700; line-height: 1.25; }
+.flag.gelb { background: var(--gelb); color: #2b2100; }
+.flag.rot { background: var(--rot); color: #fff; }
+.flag.mod { min-width: 28px; padding: 3px 6px; }
+td .leer { color: var(--text-leise); }
+
+/* Regen je Viertelstunde: vier Balken pro Stunde */
+.viertel { display: inline-flex; align-items: flex-end; gap: 3px; height: 24px; vertical-align: bottom; }
+.viertel i { display: block; width: 9px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, .3); }
+.viertel i.nass { background: #8fd0ff; }
+.viertel.demo { margin-right: 8px; }
+td .dauer { display: block; margin-top: 3px; font-size: .78rem; line-height: 1.2; color: var(--text-leise); }
+td .dauer .flag { min-width: 0; padding: 0 7px; font-size: .78rem; }
+
+/* Zeile „Modelle“: Einigkeit der Wettermodelle beim Regen */
+.mod-ok svg { width: 18px; height: 18px; fill: none; stroke: var(--text-leise); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+svg.mod-nass { width: 20px; height: 20px; color: #8fd0ff; vertical-align: middle; }
 tr.eignung th[scope="row"] { background: #163a70; }
 .lbl svg.rad { width: 52px; height: 33px; color: var(--orange); display: block; }
 
@@ -107,6 +165,7 @@ td.nass { font-weight: 700; }
 .legende .amp.top { box-shadow: 0 0 0 2px #fff; margin-left: 2px; margin-right: 10px; }
 
 .legende { list-style: none; margin: 0; padding: 0 4px; display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: .9rem; color: var(--text); }
+.legende.zweit { font-size: .85rem; color: var(--text-leise); margin-top: -4px; }
 .legende li { display: flex; align-items: center; }
 .status { margin: 0; padding: 0 4px; font-size: .85rem; color: var(--text-leise); min-height: 1.2em; }
 .status.fehler { color: #fff; font-weight: 600; }
@@ -139,6 +198,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .6); }
   .logo { width: 38px; height: 24px; }
   .flaeche { padding: 10px; }
   th, td { padding: 0 6px; min-width: 50px; }
-  th[scope="row"], thead th:first-child { min-width: 92px; padding-left: 8px; }
+  th[scope="row"], thead th:first-child { min-width: 80px; padding-left: 8px; padding-right: 6px; font-size: .92rem; }
+  .lbl { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.15; }
+  .lbl .u { font-size: .78rem; }
+  .lbl svg.rad { width: 44px; height: 28px; }
+  .fenster li { font-size: .95rem; }
 }
 @media (prefers-reduced-motion: reduce) { .rund.dreht svg { animation: none; } }

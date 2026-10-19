@@ -5,6 +5,7 @@
   const L = RadlLogik;
   const KEY_CACHE = 'radlwetter.cache';
   const KEY_ORT = 'radlwetter.ort';
+  const KEY_ID = 'radlwetter.modellid.';
   const $ = (id) => document.getElementById(id);
 
   const sicher = (fn, fallback) => { try { return fn(); } catch (e) { return fallback; } };
@@ -39,20 +40,25 @@
   }
 
   /* ---------- Abruf Open-Meteo ---------- */
-  const HOURLY = 'temperature_2m,cloud_cover,precipitation_probability,precipitation,wind_speed_10m,wind_direction_10m,sunshine_duration';
+  const HOURLY = 'temperature_2m,apparent_temperature,cloud_cover,precipitation_probability,precipitation,' +
+    'wind_speed_10m,wind_gusts_10m,wind_direction_10m,sunshine_duration';
 
-  function apiUrl(ort, modell) {
+  function apiUrl(ort, modell, nurRegen) {
     const p = new URLSearchParams({
       latitude: ort.lat,
       longitude: ort.lon,
-      hourly: HOURLY,
-      minutely_15: 'precipitation',
-      daily: 'sunrise,sunset',
       wind_speed_unit: 'kmh',
       timeformat: 'unixtime',
       timezone: 'auto',
       forecast_days: '3',
     });
+    if (nurRegen) {
+      p.set('hourly', 'precipitation');
+    } else {
+      p.set('hourly', HOURLY);
+      p.set('minutely_15', 'precipitation');
+      p.set('daily', 'sunrise,sunset');
+    }
     if (modell) p.set('models', modell);
     return 'https://api.open-meteo.com/v1/forecast?' + p.toString();
   }
@@ -62,7 +68,7 @@
     const timer = setTimeout(() => ctl.abort(), 12000);
     try {
       const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
       const j = await r.json();
       if (j.error) throw new Error(j.reason || 'API-Fehler');
       if (!j.hourly || !Array.isArray(j.hourly.time) || !j.hourly.time.length) throw new Error('Antwort ohne Stundenwerte');
@@ -72,26 +78,62 @@
     }
   }
 
-  async function holeDaten(ort) {
+  /** Probiert Modell-Kennungen der Reihe nach (zuletzt funktionierende zuerst).
+   *  Nur bei „ungültiger Parameter“ (HTTP 400) wird die nächste Kennung versucht. */
+  async function mitKennungen(ids, bauen, merkName) {
+    const gemerkt = sicher(() => localStorage.getItem(KEY_ID + merkName), null);
+    const reihe = gemerkt && ids.includes(gemerkt) ? [gemerkt, ...ids.filter((i) => i !== gemerkt)] : ids.slice();
+    let letzter = null;
+    for (const id of reihe) {
+      try {
+        const daten = await hole(bauen(id));
+        sicher(() => localStorage.setItem(KEY_ID + merkName, id));
+        return { daten, id };
+      } catch (e) {
+        letzter = e;
+        if (e.status !== 400) throw e;
+      }
+    }
+    throw letzter || new Error('keine Kennung');
+  }
+
+  async function holeHaupt(ort) {
     let a = null;
     let fehler = null;
-    try { a = await hole(apiUrl(ort, CFG.modell)); } catch (e) { fehler = e; }
+    try { a = (await mitKennungen(CFG.modell, (id) => apiUrl(ort, id, false), 'haupt')).daten; } catch (e) { fehler = e; }
     let b = null;
     if (L.brauchtErgaenzung(a)) {
-      try { b = await hole(apiUrl(ort, null)); } catch (e) { fehler = fehler || e; }
+      try { b = await hole(apiUrl(ort, null, false)); } catch (e) { fehler = fehler || e; }
     }
     if (!a && !b) throw fehler || new Error('keine Daten');
     if (!a) return b;
     return b ? L.ergaenze(a, b) : a;
   }
 
-  async function aktualisieren(grund) {
+  /** Vergleichsmodelle (nur Regen). Schlägt eines fehl, fehlt nur dieses; der Rest bleibt. */
+  async function holeVergleich(ort) {
+    const erg = await Promise.allSettled(CFG.vergleichsmodelle.map(async (vm) => {
+      const r = await mitKennungen(vm.ids, (id) => apiUrl(ort, id, true), vm.name);
+      const h = r.daten.hourly;
+      if (!L.hatWerte(h.precipitation)) throw new Error('keine Niederschlagswerte');
+      return { name: vm.name, id: r.id, hourly: { time: h.time, precipitation: h.precipitation } };
+    }));
+    const ok = [];
+    const fehlt = [];
+    erg.forEach((r, i) => { if (r.status === 'fulfilled') ok.push(r.value); else fehlt.push(CFG.vergleichsmodelle[i].name); });
+    return { ok, fehlt };
+  }
+
+  async function aktualisieren() {
     if (st.laedt) return;
     st.laedt = true;
     st.letzterVersuch = Date.now();
     $('neuBtn').classList.add('dreht');
     try {
-      st.daten = await holeDaten(st.ort);
+      const [haupt, vgl] = await Promise.all([holeHaupt(st.ort), holeVergleich(st.ort)]);
+      haupt.vergleich = vgl.ok;
+      haupt.vergleichFehlt = vgl.fehlt;
+      st.daten = haupt;
       st.abgerufen = Date.now();
       st.offline = false;
       st.fehler = null;
@@ -117,7 +159,7 @@
     }
   }
 
-  /* ---------- Darstellung ---------- */
+  /* ---------- Darstellung: Hilfen ---------- */
   const TAGE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
   const NS = 'http://www.w3.org/2000/svg';
 
@@ -128,13 +170,13 @@
     rot: '<path d="M7 7l10 10M17 7L7 17"/>',
   };
   const NAMEN = { top: 'besonders gut', gruen: 'gut', gelb: 'mäßig', rot: 'schlecht' };
+  const GRUND = { regen: 'Regen', wind: 'Wind', temp: 'Temperatur' };
 
   function ampel(stufe) {
     const s = document.createElement('span');
     s.className = 'amp ' + stufe;
     s.setAttribute('role', 'img');
     s.setAttribute('aria-label', NAMEN[stufe]);
-    s.title = NAMEN[stufe];
     s.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + GLYPHEN[stufe] + '</svg>';
     return s;
   }
@@ -146,13 +188,24 @@
     return e;
   }
 
+  function symbol(id, cls) {
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    if (cls) svg.setAttribute('class', cls);
+    svg.setAttribute('aria-hidden', 'true');
+    svg.innerHTML = '<use href="#' + id + '"/>';
+    return svg;
+  }
+
   const ganz = (v) => (v === null ? null : String(Math.round(v)).replace('-', '−'));
+  const dez1 = (v) => (v === null ? null : v.toFixed(1).replace('.', ',').replace('-', '−'));
   function mm(v) {
     if (v === null) return null;
     if (v === 0) return '0';
     if (v < 0.1) return '<0,1';
     return v.toFixed(1).replace('.', ',');
   }
+  const mmKomma = (v) => (v === 0 ? '0' : v < 0.1 ? '<0,1' : v.toFixed(1).replace('.', ','));
 
   function pfeil(richtungVon) {
     const svg = document.createElementNS(NS, 'svg');
@@ -187,7 +240,7 @@
     return svg;
   }
 
-  function beschriftung(text, einheit, icon) {
+  function beschriftung(text, einheit, icon, titel) {
     const th = el('th');
     th.scope = 'row';
     const w = el('span', 'lbl');
@@ -195,16 +248,88 @@
     if (text) w.appendChild(el('span', null, text));
     if (einheit) w.appendChild(el('span', 'u', einheit));
     th.appendChild(w);
+    if (titel) th.title = titel;
     return th;
   }
 
-  function tagText(sp, heute) {
-    const diff = sp.tag - heute;
-    const d = sp.datum;
-    const kurz = TAGE[sp.wochentag] + ' ' + d.getUTCDate() + '.' + (d.getUTCMonth() + 1) + '.';
-    if (diff === 0) return 'Heute · ' + kurz;
-    if (diff === 1) return 'Morgen · ' + kurz;
-    return kurz;
+  /** Zahl, bei Überschreiten der Grenze als gelbe/rote Marke (wie die Ampel). */
+  function wert(text, stufe) {
+    if (text === null) { const s = el('span', 'leer', '–'); return s; }
+    if (!stufe) return document.createTextNode(text);
+    const s = el('span', 'flag ' + stufe, text);
+    s.title = stufe === 'rot' ? 'schlecht (Grenze überschritten)' : 'mäßig (Grenze überschritten)';
+    return s;
+  }
+
+  const zweistellig = (n) => String(n).padStart(2, '0');
+  function uhrzeit(ts, offset) {
+    const d = new Date((ts + offset) * 1000);
+    return zweistellig(d.getUTCHours()) + ':' + zweistellig(d.getUTCMinutes());
+  }
+  function tagWort(tag, heute, wochentag, datum) {
+    const diff = tag - heute;
+    if (diff === 0) return 'Heute';
+    if (diff === 1) return 'Morgen';
+    return TAGE[wochentag] + ' ' + datum.getUTCDate() + '.' + (datum.getUTCMonth() + 1) + '.';
+  }
+  function wannText(ts, offset, heute) {
+    const d = new Date((ts + offset) * 1000);
+    const diff = L.lokalerTag(ts, offset) - heute;
+    const prefix = diff === 0 ? '' : diff === 1 ? 'morgen ' : TAGE[d.getUTCDay()] + ' ';
+    return prefix + uhrzeit(ts, offset) + ' Uhr';
+  }
+
+  /* ---------- Tabelle ---------- */
+  function eignungZelle(td, sp) {
+    const box = el('div', 'ampelbox');
+    const wrap = el('div', 'ampelwrap');
+    wrap.appendChild(ampel(sp.stufe));
+    if (sp.modellStatus === 'uneinig') wrap.appendChild(el('span', 'badge', '?'));
+    box.appendChild(wrap);
+    const g = el('div', 'gruende');
+    sp.ursachen.forEach((u) => g.appendChild(symbol('i-' + u)));
+    box.appendChild(g);
+    td.appendChild(box);
+
+    const teile = [NAMEN[sp.stufe]];
+    if (sp.ursachen.length) teile.push('Grund: ' + sp.ursachen.map((u) => GRUND[u]).join(', '));
+    if (sp.modellStatus === 'uneinig') teile.push('Wettermodelle beim Regen uneinig');
+    if (sp.topAbgewertet) teile.push('wegen Uneinigkeit nicht „besonders gut“');
+    td.title = teile.join(' · ');
+  }
+
+  function viertelZelle(td, sp) {
+    if (sp.viertel === null) { td.textContent = '–'; td.classList.add('leer'); return; }
+    const balken = el('span', 'viertel');
+    balken.setAttribute('role', 'img');
+    const vtext = (v) => (v === null ? '–' : mmKomma(v) + ' mm');
+    balken.setAttribute('aria-label', 'Regen je Viertelstunde: ' + sp.viertel.map(vtext).join(', '));
+    sp.viertel.forEach((v, k) => {
+      const i = el('i');
+      const nass = v >= CFG.regenSchwelle - 1e-9;
+      if (nass) {
+        i.className = 'nass';
+        i.style.height = Math.round(7 + 17 * Math.min(v / 0.8, 1)) + 'px';
+      }
+      i.title = (k * 15) + '–' + ((k + 1) * 15) + ' min: ' + vtext(v);
+      balken.appendChild(i);
+    });
+    td.appendChild(balken);
+    const min = el('span', 'dauer');
+    min.appendChild(wert(sp.regenDauerMin === null ? null : String(sp.regenDauerMin), sp.zellen.regenDauer));
+    td.appendChild(min);
+  }
+
+  function modellZelle(td, sp) {
+    const tip = sp.modelle.map((x) => x.name + ' ' + mmKomma(x.mm) + ' mm').join(' · ');
+    td.title = tip || 'keine Modelle verfügbar';
+    switch (sp.modellStatus) {
+      case 'uneinig': { const f = el('span', 'flag gelb mod', '?'); td.appendChild(f); break; }
+      case 'einig-nass': { td.appendChild(symbol('i-regen', 'mod-nass')); break; }
+      case 'einig-trocken': { const c = el('span', 'mod-ok'); c.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'; td.appendChild(c); break; }
+      case 'schwach': { td.appendChild(el('span', 'leer', '~')); break; }
+      default: { td.appendChild(el('span', 'leer', '–')); }
+    }
   }
 
   function tabelle(spalten) {
@@ -222,7 +347,11 @@
     while (i < spalten.length) {
       let j = i;
       while (j + 1 < spalten.length && spalten[j + 1].tag === spalten[i].tag) j++;
-      const th = el('th', i > 0 ? 'neuer-tag' : '', tagText(spalten[i], heute));
+      const s = spalten[i];
+      const text = tagWort(s.tag, heute, s.wochentag, s.datum);
+      const th = el('th', i > 0 ? 'neuer-tag' : '', text === 'Heute' || text === 'Morgen'
+        ? text + ' · ' + TAGE[s.wochentag] + ' ' + s.datum.getUTCDate() + '.' + (s.datum.getUTCMonth() + 1) + '.'
+        : text);
       th.colSpan = j - i + 1;
       th.scope = 'colgroup';
       r1.appendChild(th);
@@ -232,8 +361,7 @@
 
     const r2 = el('tr', 'stunden');
     const eck = el('th');
-    eck.appendChild(el('span', 'u', 'Uhr'));
-    eck.firstChild.style.cssText = 'color:var(--text-leise);font-weight:500;font-size:.85rem';
+    eck.appendChild(el('span', 'uhr', 'Uhr'));
     r2.appendChild(eck);
     spalten.forEach((sp, k) => {
       const th = el('th', (sp.jetzt ? 'jetzt ' : '') + (wechsel(k) ? 'neuer-tag' : ''), String(sp.stunde));
@@ -244,7 +372,8 @@
     thead.appendChild(r2);
     t.appendChild(thead);
 
-    // Zeilen; Reihenfolge: Eignung (Rennrad) zuerst, dann Sonne bis Wind
+    // Zeilen in der Reihenfolge deiner Wichtigkeit:
+    // Eignung (Rennrad) · Regen · Modelle · Wind/Böen · Sonne · Temperatur · Wolken
     const tb = el('tbody');
     const zeile = (kopf, cls, fuelle) => {
       const tr = el('tr', cls);
@@ -256,58 +385,121 @@
       });
       tb.appendChild(tr);
     };
-    const zahlZelle = (feld, fmt) => (td, sp) => {
+    const zahlZelle = (feld, fmt, zelle) => (td, sp) => {
       const s = fmt(sp[feld]);
-      if (s === null) { td.textContent = '–'; td.classList.add('leer'); } else { td.textContent = s; }
+      td.appendChild(wert(s, zelle ? sp.zellen[zelle] : null));
+      if (s === null) td.classList.add('leer');
     };
 
-    const radKopf = beschriftung('', '', radSymbol());
-    radKopf.title = 'Eignung fürs Rennrad';
+    const radKopf = beschriftung('', '', radSymbol(), 'Eignung fürs Rennrad');
     radKopf.firstChild.setAttribute('aria-label', 'Eignung fürs Rennrad');
-    zeile(radKopf, 'eignung', (td, sp) => td.appendChild(ampel(sp.stufe)));
+    zeile(radKopf, 'eignung', eignungZelle);
 
-    zeile(beschriftung('', 'min', sonnenSymbol()), 'sonne', zahlZelle('sonneMin', ganz));
-    zeile(beschriftung('Wolken', '%'), 'wolken', zahlZelle('wolken', ganz));
-    zeile(beschriftung('Temp.', '°C'), 'temp', zahlZelle('temp', ganz));
-    zeile(beschriftung('Regen', '%'), 'regenp', zahlZelle('regenProzent', ganz));
     zeile(beschriftung('Regen', 'mm'), 'regenmm', (td, sp) => {
-      zahlZelle('regenMm', mm)(td, sp);
+      zahlZelle('regenMm', mm, 'regenMm')(td, sp);
       if (sp.regenMm !== null && sp.regenMm > 0) td.classList.add('nass');
     });
-    zeile(beschriftung('Regendauer', 'min'), 'regendauer', zahlZelle('regenDauerMin', ganz));
+    zeile(beschriftung('Regendauer', 'min', null, 'Regen je Viertelstunde der Stunde, darunter Minuten mit Regen'), 'regendauer', viertelZelle);
+    zeile(beschriftung('Regen', '%'), 'regenp', zahlZelle('regenProzent', ganz, 'regenProzent'));
+    zeile(beschriftung('Modelle', 'Regen', null, 'Einigkeit der Wettermodelle beim Regen'), 'modelle', modellZelle);
     zeile(beschriftung('Wind', 'km/h'), 'wind', (td, sp) => {
       const s = ganz(sp.windKmh);
-      if (s === null) { td.textContent = '–'; td.classList.add('leer'); return; }
-      td.textContent = s;
+      td.appendChild(wert(s, sp.zellen.wind));
+      if (s === null) { td.classList.add('leer'); return; }
       if (sp.windRichtung !== null) td.appendChild(pfeil(sp.windRichtung));
     });
+    zeile(beschriftung('Böen', 'km/h', null, 'Stärkste Böe der Stunde'), 'boeen', zahlZelle('boeenKmh', ganz, 'boeen'));
+    zeile(beschriftung('', 'min', sonnenSymbol(), 'Sonnenschein in Minuten'), 'sonne', zahlZelle('sonneMin', ganz));
+    zeile(beschriftung('Temp.', '°C', null, 'Lufttemperatur'), 'temp', zahlZelle('temp', ganz, 'temp'));
+    zeile(beschriftung('Gefühlt', '°C', null, 'Gefühlte Temperatur (Wind, Feuchte, Sonne) – Grundlage der Ampel'), 'gefuehlt', zahlZelle('gefuehltC', dez1, 'gefuehlt'));
+    zeile(beschriftung('Wolken', '%'), 'wolken', zahlZelle('wolken', ganz));
     t.appendChild(tb);
   }
 
-  function fensterText(spalten) {
-    const b = L.besteZeit(spalten);
-    const p = $('fenster');
-    if (!spalten.length) { p.hidden = true; return; }
-    p.hidden = false;
-    if (!b) { p.textContent = 'Kein gutes Radlfenster in den nächsten 48 Stunden.'; return; }
-    const offset = (st.daten && st.daten.utc_offset_seconds) || 0;
-    const heute = L.lokalerTag(Date.now() / 1000, offset);
-    const von = spalten[b.von];
-    const bis = spalten[b.bis];
-    const diff = von.tag - heute;
-    const tag = diff === 0 ? 'heute' : diff === 1 ? 'morgen' : TAGE[von.wochentag];
-    const ende = (bis.stunde + 1) % 24;
-    const n = b.bis - b.von + 1;
-    p.innerHTML = '';
-    p.append('Bestes Radlfenster: ');
-    const bold = el('b', null, tag + ' ' + von.stunde + '–' + ende + ' Uhr');
-    p.appendChild(bold);
-    p.append(' (' + n + (n === 1 ? ' Stunde' : ' Stunden') + ')');
+  /* ---------- Kopfinfo: Regenausblick, Fenster, Modelle ---------- */
+  function kopfinfo(spalten) {
+    const box = $('kopfinfo');
+    if (!spalten.length || !st.daten) { box.hidden = true; return; }
+    box.hidden = false;
+    const offset = st.daten.utc_offset_seconds || 0;
+    const jetzt = Date.now() / 1000;
+    const heute = L.lokalerTag(jetzt, offset);
+
+    // 1) Regenausblick (Viertelstundenwerte des Hauptmodells)
+    const ra = $('regenausblick');
+    ra.textContent = '';
+    ra.className = 'regenausblick';
+    const a = L.regenAusblick(st.daten, jetzt, CFG);
+    if (a) {
+      let text;
+      if (a.status === 'trocken') text = 'Trocken bis ' + wannText(a.bis, offset, heute);
+      else if (a.status === 'regnet') text = a.offen ? 'Es regnet – Ende nicht absehbar' : 'Es regnet – trocken ab ' + wannText(a.bis, offset, heute);
+      else text = a.bis >= jetzt + CFG.stunden * 3600 - 60 ? 'Kein Regen in den nächsten ' + CFG.stunden + ' Stunden' : 'Kein Regen bis ' + wannText(a.bis, offset, heute);
+      ra.classList.add(a.status === 'regnet' ? 'nass' : 'trocken');
+      ra.appendChild(symbol('i-regen', 'ra-sym'));
+      const rt = el('span', 'ra-text');
+      rt.appendChild(el('b', null, text));
+      rt.appendChild(el('span', 'quelle', ' (ICON)'));
+      ra.appendChild(rt);
+    }
+    ra.hidden = !a;
+
+    // 2) Bestes Radlfenster je Tag (mindestens N Stunden)
+    const ul = $('fenster');
+    ul.textContent = '';
+    const fenster = L.fensterProTag(spalten, CFG);
+    const proTag = new Map(fenster.map((f) => [f.tag, f]));
+    const tage = [];
+    spalten.forEach((s) => { if (!tage.find((x) => x.tag === s.tag)) tage.push(s); });
+    tage.forEach((s) => {
+      const li = el('li');
+      const f = proTag.get(s.tag);
+      const name = tagWort(s.tag, heute, s.wochentag, s.datum);
+      li.appendChild(el('span', 'tag', name));
+      if (f) {
+        const von = spalten[f.von];
+        const bis = spalten[f.bis];
+        li.appendChild(el('b', null, von.stunde + '–' + ((bis.stunde + 1) % 24) + ' Uhr'));
+        li.appendChild(el('span', 'dauerf', f.stunden + ' Std.'));
+        if (f.unsicher > 0) {
+          const u = el('span', 'unsicherbox');
+          u.title = f.unsicher + ' Std. mit uneinigen Wettermodellen beim Regen';
+          u.appendChild(el('span', 'badge inline', '?'));
+          u.appendChild(el('span', 'unsicher-text', f.unsicher + ' Std. unsicher'));
+          li.appendChild(u);
+        }
+      } else {
+        li.classList.add('keins');
+        li.appendChild(el('span', 'keinfenster', 'kein Fenster ab ' + CFG.fenster.mindestStunden + ' Std.'));
+      }
+      ul.appendChild(li);
+    });
+
+    // 3) Einigkeit der Wettermodelle beim Regen – deutlich sichtbar
+    const mh = $('modellhinweis');
+    const namen = ['ICON'].concat((st.daten.vergleich || []).map((v) => v.name));
+    const fehlt = st.daten.vergleichFehlt || [];
+    const uneinig = spalten.filter((s) => s.modellStatus === 'uneinig').length;
+    mh.className = 'modellhinweis';
+    mh.textContent = '';
+    if (namen.length < 2) {
+      mh.classList.add('warn');
+      mh.textContent = 'Modellvergleich nicht verfügbar (' + (fehlt.join(', ') || 'keine Vergleichsmodelle') + ' nicht abrufbar) – Sicherheit beim Regen unbekannt.';
+    } else if (uneinig > 0) {
+      mh.classList.add('warn');
+      mh.appendChild(el('span', 'badge inline', '?'));
+      mh.appendChild(el('b', null, 'Regen unsicher: '));
+      mh.append('Die Wettermodelle (' + namen.join(', ') + ') sind sich in ' + uneinig + (uneinig === 1 ? ' Stunde' : ' Stunden') + ' uneinig (mit ? markiert).' +
+        (fehlt.length ? ' Ohne ' + fehlt.join(', ') + ' (nicht abrufbar).' : ''));
+    } else {
+      mh.textContent = 'Die Wettermodelle (' + namen.join(', ') + ') sind sich beim Regen einig.' +
+        (fehlt.length ? ' Ohne ' + fehlt.join(', ') + ' (nicht abrufbar).' : '');
+    }
   }
 
-  const uhrzeit = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  const uhrText = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 
-  function statusText(spalten) {
+  function statusText() {
     const s = $('status');
     s.classList.remove('fehler');
     if (!st.daten) {
@@ -316,10 +508,10 @@
       return;
     }
     if (st.offline) {
-      s.textContent = 'Offline – gespeicherte Daten von ' + uhrzeit(st.abgerufen) + ' Uhr. Neuer Versuch läuft automatisch.';
+      s.textContent = 'Offline – gespeicherte Daten von ' + uhrText(st.abgerufen) + ' Uhr. Neuer Versuch läuft automatisch.';
       return;
     }
-    s.textContent = 'Stand ' + uhrzeit(st.abgerufen) + ' Uhr · ' + st.ort.name +
+    s.textContent = 'Stand ' + uhrText(st.abgerufen) + ' Uhr · ' + st.ort.name +
       ' · nur Tageslicht, nächste ' + CFG.stunden + ' Stunden';
   }
 
@@ -333,10 +525,10 @@
       $('rahmen').hidden = false;
     } else {
       $('tafel').textContent = '';
-      $('rahmen').hidden = !!st.daten ? false : true;
+      $('rahmen').hidden = !st.daten;
     }
-    fensterText(spalten);
-    statusText(spalten);
+    kopfinfo(spalten);
+    statusText();
   }
 
   // Legende mit Symbolen füllen
@@ -357,7 +549,7 @@
     const c = cacheLesen();
     if (c) { st.daten = c.daten; st.abgerufen = c.abgerufen; }
     zeichne();
-    aktualisieren('ort');
+    aktualisieren();
     if (dlg.open) dlg.close();
   }
 
@@ -406,7 +598,7 @@
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 
   /* ---------- Aktualisierungs-Takt ---------- */
-  $('neuBtn').addEventListener('click', () => aktualisieren('hand'));
+  $('neuBtn').addEventListener('click', () => aktualisieren());
 
   function takt() {
     const jetzt = Date.now();
@@ -414,11 +606,11 @@
     if (stunde !== st.stunde) {
       st.stunde = stunde;
       zeichne();
-      aktualisieren('stunde');
+      aktualisieren();
       return;
     }
     const wartezeit = st.fehler || st.offline || !st.daten ? 60000 : CFG.intervallMinuten * 60000;
-    if (jetzt - st.letzterVersuch >= wartezeit) aktualisieren('takt');
+    if (jetzt - st.letzterVersuch >= wartezeit) aktualisieren();
   }
   setInterval(takt, 30000);
 
@@ -426,10 +618,10 @@
     if (document.visibilityState !== 'visible') return;
     st.stunde = Math.floor(Date.now() / 3600000);
     zeichne();
-    if (Date.now() - st.letzterVersuch > 60000) aktualisieren('tab');
+    if (Date.now() - st.letzterVersuch > 60000) aktualisieren();
     if (st.reg) sicher(() => st.reg.update());
   });
-  window.addEventListener('online', () => aktualisieren('online'));
+  window.addEventListener('online', () => aktualisieren());
 
   /* ---------- Service Worker (Installierbarkeit, Offline, Selbst-Update) ---------- */
   if ('serviceWorker' in navigator) {
@@ -446,7 +638,7 @@
     const b = $('updBtn');
     b.textContent = 'Prüfe …';
     try { if (st.reg) await st.reg.update(); } catch (e) { /* offline */ }
-    aktualisieren('update');
+    aktualisieren();
     setTimeout(() => { b.textContent = 'Aktuell – v' + CFG.version; setTimeout(() => { b.textContent = 'Nach Update suchen'; }, 2500); }, 1200);
   });
 
@@ -456,5 +648,5 @@
     st.daten = c0.daten; st.abgerufen = c0.abgerufen; // sofort etwas zeigen, Abruf folgt
   }
   zeichne();
-  aktualisieren('start');
+  aktualisieren();
 })();

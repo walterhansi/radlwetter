@@ -19,16 +19,19 @@ function erzeuge(jetztSek, opt = {}) {
   const hourly = {
     time,
     temperature_2m: [], cloud_cover: [], precipitation_probability: [], precipitation: [],
-    wind_speed_10m: [], wind_direction_10m: [], sunshine_duration: [],
+    wind_speed_10m: [], wind_gusts_10m: [], wind_direction_10m: [], sunshine_duration: [],
+    apparent_temperature: [],
   };
   for (let i = 0; i < n; i++) {
     const h = i % 24;
     const tageszeit = Math.sin(((h - 9) / 24) * 2 * Math.PI);
     hourly.temperature_2m.push(+(9 + 6 * tageszeit).toFixed(1));
+    hourly.apparent_temperature.push(+(8 + 6 * tageszeit).toFixed(1)); // gefühlt etwas kälter
     hourly.cloud_cover.push(Math.round(40 + 30 * Math.sin(i / 5)));
     hourly.precipitation_probability.push(0);
     hourly.precipitation.push(0);
     hourly.wind_speed_10m.push(+(12 + 6 * Math.sin(i / 7)).toFixed(1));
+    hourly.wind_gusts_10m.push(+(22 + 8 * Math.sin(i / 7)).toFixed(1));
     hourly.wind_direction_10m.push((200 + i * 9) % 360);
     // Sonne der vorangegangenen Stunde: tagsüber viel, nachts 0
     hourly.sunshine_duration.push(h >= 8 && h <= 18 ? 3600 : 0);
@@ -52,4 +55,9 @@ function erzeuge(jetztSek, opt = {}) {
 /** Setzt einen Wert über die lokale Stunde des Tages `tag` (0 = heute) – Zeitstempel selbst. */
 function idxStunde(sim, tag, stunde) { return tag * 24 + stunde; }
 
-module.exports = { erzeuge, idxStunde, H };
+/** Vergleichsmodell (nur Niederschlag je Stunde) passend zu den Stundenwerten der Hauptdaten. */
+function vergleich(daten, name, mmProStunde = 0) {
+  return { name, hourly: { time: daten.hourly.time.slice(), precipitation: daten.hourly.time.map(() => mmProStunde) } };
+}
+
+module.exports = { erzeuge, idxStunde, vergleich, H };

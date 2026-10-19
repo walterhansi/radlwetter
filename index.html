@@ -35,7 +35,11 @@
 
   <main>
     <section class="flaeche" aria-live="polite">
-      <p id="fenster" class="fenster" hidden></p>
+      <div id="kopfinfo" class="kopfinfo" hidden>
+        <p id="regenausblick" class="regenausblick"></p>
+        <ul id="fenster" class="fenster"></ul>
+        <p id="modellhinweis" class="modellhinweis"></p>
+      </div>
       <div id="rahmen" class="rahmen" tabindex="0" role="region" aria-label="Wettertabelle, horizontal verschiebbar">
         <table id="tafel"></table>
       </div>
@@ -44,6 +48,11 @@
         <li><span class="amp gruen" data-s="gruen"></span>gut</li>
         <li><span class="amp gelb" data-s="gelb"></span>mäßig</li>
         <li><span class="amp rot" data-s="rot"></span>schlecht</li>
+      </ul>
+      <ul class="legende zweit" aria-label="Weitere Symbole">
+        <li><span class="gruende-demo"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-regen"/></svg><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wind"/></svg><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-temp"/></svg></span>Grund der Farbe: Regen, Wind, Temperatur</li>
+        <li><span class="badge demo">?</span>Wettermodelle beim Regen uneinig</li>
+        <li><span class="viertel demo" aria-hidden="true"><i class="nass" style="height:9px"></i><i class="nass" style="height:20px"></i><i></i><i></i></span>Regen je Viertelstunde</li>
       </ul>
       <p id="status" class="status"></p>
     </section>
@@ -82,6 +91,23 @@
         <path d="M13 28 L22 12"/>
         <path d="M22 12 L20.5 7 M16 6.5 L25 6.5"/>
         <path d="M43 12 L45 7.5 L49.5 7.5 Q54 7.5 54 11.5 Q54 15 50.5 15"/>
+      </g>
+    </symbol>
+    <!-- Symbole für den Grund einer gelben/roten Ampel -->
+    <symbol id="i-regen" viewBox="0 0 24 24">
+      <path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" d="M12 3.2 C12 3.2 5.8 10.4 5.8 14.6 a6.2 6.2 0 0 0 12.4 0 C18.2 10.4 12 3.2 12 3.2z"/>
+    </symbol>
+    <symbol id="i-wind" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9h10.5a3 3 0 1 0-3-3"/>
+        <path d="M3 14h15a3 3 0 1 1-3 3"/>
+        <path d="M3 19h6"/>
+      </g>
+    </symbol>
+    <symbol id="i-temp" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 14.2V5.5a2 2 0 0 1 4 0v8.7a4.2 4.2 0 1 1-4 0z"/>
+        <path d="M12 10v6.5"/>
       </g>
     </symbol>
   </svg>
