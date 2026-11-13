@@ -900,7 +900,7 @@
   if ('serviceWorker' in navigator) {
     const hatteSW = !!navigator.serviceWorker.controller;
     let neuGeladen = false;
-    navigator.serviceWorker.register('./sw.js').then((reg) => { st.reg = reg; }).catch(() => {});
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => { st.reg = reg; }).catch(() => {});
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!hatteSW || neuGeladen) return; // erste Installation braucht keinen Neustart
       neuGeladen = true;
