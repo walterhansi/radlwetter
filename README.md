@@ -14,12 +14,12 @@ Oben: amtliche DWD-Warnungen für den Ort (falls vorhanden), „Trocken bis …�
 
 Tabelle (von oben nach unten):
 
-1. **Rennrad** – Ampel; darunter kleine Symbole, **warum** gelb oder rot (Gewitter, Warnung, Regen, Glätte, nasse Straße, Wind, Temperatur); „?“ = Modelle uneinig
+1. **Rennrad** – Ampel; darunter kleine Symbole, **warum** gelb oder rot (Gewitter, Warnung, Regen, Schauer in der Nähe, Glätte, nasse Straße, Wind, Temperatur); „?“ = Modelle uneinig
 2. Regen mm – kleines „R“ = Wert vom DWD-Radar (gemessen oder 2-Std.-Vorschau); die Farbe der Zahl (gelb/rot) zeigt wie immer die Menge
 3. Regendauer – Viertelstunden-Balken plus Minuten
 4. Regen % – Anteil der 20 Läufe des D2-Ensembles mit Regen (danach ICON-EPS)
 5. Modelle (Regen) – Vergleich ICON / ECMWF / GFS / DWD-Stationsvorhersage
-6. Gefahr – Gewitter, Glätte, nasse Straße, DWD-Warnung (Umriss-Dreieck = Hinweis ohne Ampelwirkung, z. B. Frost)
+6. Gefahr – Gewitter, Schauer in der Nähe (5 km), Glätte, nasse Straße, DWD-Warnung (Umriss-Dreieck = Hinweis ohne Ampelwirkung, z. B. Frost)
 7. Wind km/h mit Richtungspfeil
 8. Böen km/h
 9. Sonne (Minuten)
@@ -36,7 +36,7 @@ Zellen, die gelb oder rot wirken, sind selbst gelb/rot markiert.
 | Stufe | Bedingung (eine genügt) |
 |---|---|
 | rot | Regen ab 1 mm/h, ab 60 %, Wind ab 35 km/h, Böen ab 50 km/h, gefühlt unter 5 °C, **Gewitter** (Wettercode 95/96/99), **Glätte** (Luft ≤ 2 °C und nass/Regen/Schnee) oder **amtliche DWD-Warnung** vor Gewitter, Glätte, Sturm/Orkan, Stark-/Dauerregen, Unwetter |
-| gelb | messbarer Regen (ab 0,1 mm/h oder eine nasse Viertelstunde), Regen ab 30 %, Wind ab 25 km/h, Böen ab 40 km/h, gefühlt unter 10 °C, **nasse Straße** (ab 0,3 mm in den 2 Stunden davor) oder **Blitzpotenzial** ab 1 J/kg (ICON-D2) |
+| gelb | messbarer Regen (ab 0,1 mm/h oder eine nasse Viertelstunde), Regen ab 30 %, Wind ab 25 km/h, Böen ab 40 km/h, gefühlt unter 10 °C, **nasse Straße** (ab 0,3 mm in den 2 Stunden davor) **Blitzpotenzial** ab 1 J/kg (ICON-D2) oder **Schauer in der Nähe** (Radar: mindestens 10 % der Fläche im Umkreis von 5 km mit Regen, am Ort selbst trocken) |
 | grün | sonst |
 | besonders gut | grün **und** Sonne 60 min, 0 mm, Regendauer 0 (fehlt einer der Werte, bleibt es normal grün); bei Modell-Uneinigkeit nur grün |
 
@@ -49,6 +49,8 @@ Zusätzlich zu ICON werden ECMWF, GFS und die DWD-Stationsvorhersage MOSMIX (nä
 ## Radar
 
 DWD-Radarkomposit RV über Bright Sky (`/radar`, 1 km, alle 5 Minuten, gemessen + Vorschau bis 2 Stunden). Je 5-Minuten-Bild zählt der höchste Wert im Umkreis von 1 km. Eine Stunde nutzt das Radar nur, wenn alle 12 Bilder da sind (meist die laufende und die nächste Stunde). „Regen“ im Ausblick ab 0,02 mm je 5 Minuten (`radar` in `config.js`). Das Radar wird alle 5 Minuten neu geholt.
+
+Umkreis: Zusätzlich wertet die App je Radarbild den Kreis von 5 km aus (rund 80 Felder à 1 km²): Anteil der Fläche mit Regen und Entfernung zum nächsten Regen. Ab 10 % (`nahAnteilProzent`, ein Vorschlag) wird die Stunde gelb mit dem Grund „Schauer in der Nähe“ – nicht rot, denn Regenmenge und Rot bleiben beim Ort selbst. Der Ausblick nennt es zusätzlich („Schauer im Umkreis von 5 km ab … (nächster ca. … km)“). So werden knapp vorbeiziehende Schauer und kleine Fehler der Radar-Vorschau bei der Zugbahn erfasst, ohne an Schauertagen ständig Rot zu zeigen.
 
 ## Treffsicherheit
 

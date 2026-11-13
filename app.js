@@ -162,9 +162,10 @@
   async function holeRadar(ort) {
     const ab = Math.floor(Date.now() / 3600000) * 3600000;
     const km = CFG.radar.umkreisKm;
-    const url = BS + 'radar?format=plain&lat=' + ort.lat + '&lon=' + ort.lon + '&distance=' + ((km + 2) * 1000) +
+    const weit = Math.max(km, CFG.radar.nahKm || 0);
+    const url = BS + 'radar?format=plain&lat=' + ort.lat + '&lon=' + ort.lon + '&distance=' + ((weit + 2) * 1000) +
       '&date=' + isoZeit(ab) + '&last_date=' + isoZeit(Date.now() + 130 * 60000);
-    const r = L.radarAuswerten(await holeJson(url), km);
+    const r = L.radarAuswerten(await holeJson(url), km, CFG.radar.nahKm ? { km: CFG.radar.nahKm, nassMm5: CFG.radar.nassMm5 } : null);
     if (!r) throw new Error('keine Radarwerte');
     return r;
   }
@@ -293,7 +294,7 @@
     rot: '<path d="M7 7l10 10M17 7L7 17"/>',
   };
   const NAMEN = { top: 'besonders gut', gruen: 'gut', gelb: 'mäßig', rot: 'schlecht' };
-  const GRUND = { regen: 'Regen', wind: 'Wind', temp: 'Temperatur', gewitter: 'Gewitter', nass: 'nasse Straße', glaette: 'Glätte', warnung: 'DWD-Warnung' };
+  const GRUND = { regen: 'Regen', wind: 'Wind', temp: 'Temperatur', gewitter: 'Gewitter', nass: 'nasse Straße', glaette: 'Glätte', warnung: 'DWD-Warnung', nah: 'Schauer in der Nähe' };
 
   function ampel(stufe) {
     const s = document.createElement('span');
@@ -450,6 +451,7 @@
     const liste = [];
     if (z.gewitter) liste.push(['gewitter', z.gewitter, sp.gewitterCode ? 'Gewitter vorhergesagt' : (z.gewitter === 'rot' ? 'DWD-Gewitterwarnung' : 'Gewitter möglich (Blitzpotenzial)')]);
     if (z.glaette) liste.push(['glaette', z.glaette, sp.glaette ? 'Glättegefahr (kalt und nass)' : 'DWD-Glättewarnung']);
+    if (z.nah) liste.push(['nah', z.nah, 'Schauer in der Nähe: ' + sp.nahProzent + ' % der Fläche im Umkreis von ' + CFG.radar.nahKm + ' km mit Regen' + (sp.nahKmMin !== null && sp.nahKmMin !== undefined ? ', nächster ca. ' + sp.nahKmMin + ' km entfernt' : '') + ' (Radar)']);
     if (z.nass && !z.glaette) liste.push(['nass', z.nass, 'Straße noch nass (' + mmKomma(sp.regenVorher) + ' mm in den 2 Std. davor)']);
     if (z.warnung) liste.push(['warnung', z.warnung, 'DWD-Warnung']);
     const hinweise = (sp.warnungen || []).filter((w) => !w.art);
@@ -591,6 +593,13 @@
       const rt = el('span', 'ra-text');
       rt.appendChild(el('b', null, text));
       rt.appendChild(el('span', 'quelle', ' (' + (a.quelle || 'ICON') + (a.quelle && a.quelle.startsWith('Radar') ? ', DWD' : '') + ')'));
+      if (a.nahAb !== undefined) {
+        const n = el('span', 'nahtext');
+        n.appendChild(symbol('i-nah', 'nah-sym'));
+        n.append((a.nahJetzt ? 'Schauer im Umkreis von ' + CFG.radar.nahKm + ' km' : 'Schauer im Umkreis von ' + CFG.radar.nahKm + ' km ab ' + wannText(a.nahAb, offset, heute)) +
+          (a.nahKm !== null && a.nahKm !== undefined ? ' (nächster ca. ' + a.nahKm + ' km)' : ''));
+        rt.appendChild(n);
+      }
       ra.appendChild(rt);
     }
     ra.hidden = !a;

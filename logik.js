@@ -14,9 +14,9 @@
   const hatWerte = (arr) => Array.isArray(arr) && arr.some((v) => zahl(v) !== null);
   const GRUPPEN = {
     regenMm: 'regen', regenProzent: 'regen', regenDauer: 'regen', wind: 'wind', boeen: 'wind', temp: 'temp', gefuehlt: 'temp',
-    gewitter: 'gewitter', nass: 'nass', glaette: 'glaette', warnung: 'warnung',
+    gewitter: 'gewitter', nass: 'nass', glaette: 'glaette', warnung: 'warnung', nah: 'nah',
   };
-  const GRUPPEN_REIHENFOLGE = ['gewitter', 'warnung', 'regen', 'glaette', 'nass', 'wind', 'temp'];
+  const GRUPPEN_REIHENFOLGE = ['gewitter', 'warnung', 'regen', 'nah', 'glaette', 'nass', 'wind', 'temp'];
   const GEWITTER_CODES = [95, 96, 99];
   const isoSek = (s) => { const t = Date.parse(s); return isFinite(t) ? Math.round(t / 1000) : null; };
 
@@ -38,12 +38,18 @@
   }
 
   /** DWD-Radar (Bright Sky /radar, format=plain): mm je 5 Minuten am Ort.
-   *  Je Bild zählt der höchste Wert im Umkreis von `umkreis` Pixeln (1 Pixel = 1 km). */
-  function radarAuswerten(antwort, umkreis) {
+   *  Je Bild zählt der höchste Wert im Umkreis von `umkreis` Pixeln (1 Pixel = 1 km).
+   *  Zusätzlich (nah = { km, nassMm5 }): Anteil der Fläche im Kreis von nah.km mit Regen, in Prozent,
+   *  und die Entfernung zum nächsten nassen Feld. */
+  function radarAuswerten(antwort, umkreis, nah) {
     if (!antwort || !Array.isArray(antwort.radar) || !antwort.latlon_position) return null;
-    const px = Math.round(antwort.latlon_position.x);
-    const py = Math.round(antwort.latlon_position.y);
+    const fx = antwort.latlon_position.x;
+    const fy = antwort.latlon_position.y;
+    const px = Math.round(fx);
+    const py = Math.round(fy);
     const r = umkreis === undefined ? 1 : umkreis;
+    const nahKm = nah && nah.km;
+    const nahSchwelle = nah ? Math.round((nah.nassMm5 || 0.02) * 100) : null;
     let stand = null;
     const bilder = [];
     for (const b of antwort.radar) {
@@ -58,7 +64,25 @@
         }
       }
       if (max === null) continue;
-      bilder.push({ ts, mm: max / 100 });
+      const bild = { ts, mm: max / 100 };
+      if (nahKm) {
+        let n = 0;
+        let nass = 0;
+        let naechste = null;
+        const k = Math.ceil(nahKm);
+        for (let y = py - k; y <= py + k; y++) {
+          for (let x = px - k; x <= px + k; x++) {
+            const d = Math.hypot(x - fx, y - fy);
+            if (d > nahKm + 1e-9) continue;
+            const v = g[y] && zahl(g[y][x]);
+            if (v === null || v === undefined) continue;
+            n++;
+            if (v >= nahSchwelle) { nass++; if (naechste === null || d < naechste) naechste = d; }
+          }
+        }
+        if (n) { bild.nahProzent = Math.round((100 * nass) / n); bild.nahKm = naechste === null ? null : Math.round(naechste); }
+      }
+      bilder.push(bild);
       // Quelle „RADARCOMP::RV::<Zeit>“: Zeit der letzten Messung; spätere Bilder sind Vorhersage
       const q = String(b.source || '').split('::').pop();
       const qs = isoSek(q);
@@ -180,6 +204,7 @@
     const ensIdx = ens ? indexVon(ens.time) : null;
     const radar = daten.radar && Array.isArray(daten.radar.bilder) ? daten.radar : null;
     const radarIdx = radar ? new Map(radar.bilder.map((b) => [b.ts, b.mm])) : null;
+    const radarBild = radar ? new Map(radar.bilder.map((b) => [b.ts, b])) : null;
     const nassCfg = cfg.nasseStrasse || null;
     const glCfg = cfg.glaette || null;
 
@@ -267,8 +292,19 @@
           sp.regenMm = summe(fuenf);
           sp.viertel = [0, 1, 2, 3].map((q) => summe(fuenf.slice(q * 3, q * 3 + 3)));
           sp.regenDauerMin = sp.viertel.filter((v) => v >= cfg.regenSchwelle - 1e-9).length * 15;
+          // Umkreis: größter Flächenanteil mit Regen in dieser Stunde (nur wenn ausgewertet)
+          const nahW = [];
+          for (let k = 1; k <= 12; k++) { const b = radarBild.get(ts + k * 300); if (b && b.nahProzent !== undefined) nahW.push(b); }
+          if (nahW.length === 12) {
+            const best = nahW.reduce((a, b) => (b.nahProzent > a.nahProzent ? b : a));
+            sp.nahProzent = best.nahProzent;
+            const dist = nahW.map((b) => b.nahKm).filter((v) => v !== null && v !== undefined);
+            sp.nahKmMin = dist.length ? Math.min(...dist) : null;
+          }
         }
       }
+      sp.nahRegen = !!(cfg.radar && cfg.radar.nahAnteilProzent !== undefined && sp.nahProzent !== undefined &&
+        sp.nahProzent >= cfg.radar.nahAnteilProzent);
 
       // Gewitter: Wettercode 95/96/99 (ICON) und Blitzpotenzial (nur ICON-D2), je Stunde das Stärkere
       const code = maxVon(hole(h.weather_code, ts), hole(h.weather_code, vor));
@@ -329,6 +365,8 @@
       gewitter: sp.gewitterCode ? 'rot'
         : (y.blitzJkg !== undefined && sp.blitz !== null && sp.blitz !== undefined && sp.blitz >= y.blitzJkg ? 'gelb' : null),
       nass: sp.strasseNass ? 'gelb' : null,
+      // Schauer im Umkreis (Radar): gelb, aber nur wenn es am Ort selbst nicht ohnehin schon regnet
+      nah: sp.nahRegen && !(sp.regenMm !== null && sp.regenMm !== undefined && sp.regenMm >= y.regenMm) ? 'gelb' : null,
       glaette: sp.glaette ? 'rot' : null,
       warnung: null,
     };
@@ -443,6 +481,21 @@
 
   /** Trocken bis wann / Regen bis wann: zuerst DWD-Radar (gemessen + 2 Std. Vorschau), danach ICON-Viertelstunden. */
   function regenAusblick(daten, jetztSek, cfg) {
+    const a = regenAusblickOrt(daten, jetztSek, cfg);
+    if (!a || a.status === 'regnet') return a;
+    // Schauer im Umkreis (Radar), bevor es am Ort selbst regnet
+    const rcfg = cfg.radar || {};
+    const radar = daten.radar && Array.isArray(daten.radar.bilder) ? daten.radar : null;
+    if (!radar || rcfg.nahAnteilProzent === undefined) return a;
+    const bilder = radar.bilder.filter((b) => b.ts > jetztSek);
+    if (!bilder.length || bilder[0].ts - jetztSek > 600) return a;
+    const grenze = a.status === 'trocken' ? a.bis : Infinity;
+    const nah = bilder.find((b) => b.nahProzent !== undefined && b.nahProzent >= rcfg.nahAnteilProzent && b.ts - 300 < grenze);
+    if (nah) { a.nahAb = Math.max(jetztSek, nah.ts - 300); a.nahJetzt = nah === bilder[0]; a.nahKm = nah.nahKm; }
+    return a;
+  }
+
+  function regenAusblickOrt(daten, jetztSek, cfg) {
     const radar = daten.radar && Array.isArray(daten.radar.bilder) ? daten.radar : null;
     const rcfg = cfg.radar || {};
     const bilder = radar ? radar.bilder.filter((b) => b.ts > jetztSek) : [];

@@ -1,7 +1,7 @@
 /* Radlwetter – Einstellungen. Hier stehen alle Grenzwerte und Vorgaben. */
 const RADL_CONFIG = {
   // Wird bei jeder Änderung hochgezählt; der Service Worker nutzt sie als Cache-Name.
-  version: '1.2.1',
+  version: '1.3.0',
 
   // Standard-Ort (im Programm per Ortswahl änderbar)
   ort: { name: 'Moosburg', lat: 48.47, lon: 11.94 },
@@ -30,8 +30,10 @@ const RADL_CONFIG = {
   ensemble: ['icon_d2', 'icon_d2_eps'],
 
   // DWD-Regenradar (Bright Sky, 1 km, 5 Minuten, gemessen + 2 Stunden Vorschau).
-  // umkreisKm: höchster Wert im Umkreis zählt; nassMm5: ab so viel mm je 5 Minuten gilt „Regen“.
-  radar: { aktiv: true, umkreisKm: 1, nassMm5: 0.02, intervallMinuten: 5 },
+  // umkreisKm: höchster Wert im Umkreis zählt (Regenmenge am Ort); nassMm5: ab so viel mm je 5 Minuten gilt „Regen“.
+  // nahKm / nahAnteilProzent: „Schauer in der Nähe“ (gelb), wenn im Kreis von nahKm mindestens so viel
+  // Prozent der Fläche Regen haben (10 % ist ein Vorschlag, mit der Trefferquote überprüfbar).
+  radar: { aktiv: true, umkreisKm: 1, nassMm5: 0.02, intervallMinuten: 5, nahKm: 5, nahAnteilProzent: 10 },
 
   // Amtliche DWD-Warnungen für den Ort (Bright Sky). Gewitter, Glätte, Sturm, Starkregen -> rot.
   warnungen: true,

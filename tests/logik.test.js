@@ -520,4 +520,56 @@ test('Treffsicherheit: Vorhersage vom Vortag gegen Messung', () => {
   assert.deepEqual(mw.stationen, ['Nandlstadt', 'München-Flughafen'], 'nur Regen-Stationen, Flughafen nur einmal');
 });
 
+/* ---------- v1.3: Schauer im Umkreis von 5 km ---------- */
+function radarGross(tag0, abStd, minuten, nassAb, nassBis, standMin = 0, pixel = (x, y) => (x === 9 && y >= 3 && y <= 7) || (x === 10 && y >= 4 && y <= 6)) {
+  const radar = [];
+  for (let m = 0; m <= minuten; m += 5) {
+    const ts = STD(tag0, abStd, m);
+    const an = ts > nassAb && ts <= nassBis;
+    const g = Array.from({ length: 11 }, (_, y) => Array.from({ length: 11 }, (_, x) => (an && pixel(x, y) ? 10 : 0)));
+    radar.push({ timestamp: iso(ts), source: 'RADARCOMP::RV::' + iso(Math.min(ts, STD(tag0, abStd, standMin))), precipitation_5: g });
+  }
+  return { radar, latlon_position: { x: 5.2, y: 5.3 } };
+}
+const NAH = { km: 5, nassMm5: 0.02 };
+
+test('Umkreis 5 km: Flächenanteil und Entfernung je Radarbild', () => {
+  const { tag0 } = erzeuge(JETZT);
+  const r = L.radarAuswerten(radarGross(tag0, 14, 60, 0, Infinity), 1, NAH);
+  assert.equal(r.bilder[1].nahProzent, 10); // 8 von 79 Feldern im Kreis
+  assert.equal(r.bilder[1].nahKm, 4);
+  assert.equal(r.bilder[1].mm, 0, 'am Ort selbst trocken');
+  assert.equal(L.radarAuswerten(radarGross(tag0, 14, 60, 0, Infinity), 1).bilder[1].nahProzent, undefined, 'ohne Umkreis keine Auswertung');
+});
+
+test('Schauer in der Nähe: gelb, nicht rot; am Ort nass bleibt es beim Regen-Grund', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  // Regen im Umkreis 15:20–15:40
+  daten.radar = L.radarAuswerten(radarGross(tag0, 14, 175, STD(tag0, 15, 15), STD(tag0, 15, 40), 50), 1, NAH);
+  const s14 = spalte(daten, 14);
+  assert.equal(s14.nahRegen, false);
+  assert.equal(s14.stufe === 'gruen' || s14.stufe === 'top', true);
+  const s15 = spalte(daten, 15);
+  assert.equal(s15.nahProzent, 10); assert.equal(s15.nahKmMin, 4);
+  assert.equal(s15.stufe, 'gelb'); assert.deepEqual(s15.ursachen, ['nah']);
+  // 20 % Schwelle: dann nicht
+  assert.equal(L.baueSpalten(daten, JETZT, { ...CFG, radar: { ...CFG.radar, nahAnteilProzent: 20 } }).find((s) => s.stunde === 15).nahRegen, false);
+  // Regnet es auch am Ort, zählt nur „Regen“
+  daten.radar = L.radarAuswerten(radarGross(tag0, 14, 175, STD(tag0, 15, 15), STD(tag0, 15, 40), 50,
+    (x, y) => (x === 9 && y >= 3 && y <= 7) || (x === 10 && y >= 4 && y <= 6) || (x === 5 && y === 5)), 1, NAH);
+  const s15b = spalte(daten, 15);
+  assert.equal(s15b.zellen.nah, null); assert.deepEqual(s15b.ursachen, ['regen']);
+});
+
+test('Ausblick: Schauer im Umkreis vor dem Regen am Ort', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  daten.radar = L.radarAuswerten(radarGross(tag0, 14, 175, STD(tag0, 15, 15), STD(tag0, 15, 40), 50), 1, NAH);
+  const a = L.regenAusblick(daten, JETZT, CFG);
+  assert.equal(a.status, 'kein-regen');
+  assert.equal(a.nahAb, STD(tag0, 15, 15)); assert.equal(a.nahJetzt, false); assert.equal(a.nahKm, 4);
+  // ohne Regen im Umkreis kein Hinweis
+  daten.radar = L.radarAuswerten(radarGross(tag0, 14, 175, 0, 0, 50), 1, NAH);
+  assert.equal(L.regenAusblick(daten, JETZT, CFG).nahAb, undefined);
+});
+
 console.log('\n' + nTests + ' Tests bestanden');
