@@ -408,7 +408,6 @@
     const box = el('div', 'ampelbox');
     const wrap = el('div', 'ampelwrap');
     wrap.appendChild(ampel(sp.stufe));
-    if (sp.unsicher) wrap.appendChild(el('span', 'badge', '?'));
     box.appendChild(wrap);
     const g = el('div', 'gruende');
     sp.ursachen.forEach((u) => g.appendChild(symbol('i-' + u)));
@@ -691,8 +690,7 @@
         const t = tagWort(b.tag, heute, b.sp.wochentag, b.sp.datum);
         return (t === 'Heute' ? 'heute' : t === 'Morgen' ? 'morgen' : t) + ' ' + b.von + '–' + ((b.bis + 1) % 24) + ' Uhr';
       }).join(', ');
-      mh.append('Die Wettermodelle (' + namen.join(', ') + ') sind sich uneinig: ' + wann +
-        '. Diese Stunden tragen ein gelbes ? oben rechts an der Ampel (Tabelle ggf. nach rechts schieben).' +
+      mh.append('Die Wettermodelle (' + namen.join(', ') + ') sind sich uneinig: ' + wann + '.' +
         (fehlt.length ? ' Ohne ' + fehlt.join(', ') + ' (nicht abrufbar).' : ''));
     } else {
       mh.textContent = 'Die Wettermodelle (' + namen.join(', ') + ') sind sich beim Regen einig.' +
@@ -800,7 +798,7 @@
       'Wettermodell ICON des Deutschen Wetterdienstes, in den ersten 2 Tagen mit 2 km feinem Raster.',
       'Regenwahrscheinlichkeit: Das feine Modell wird 20-mal mit leicht veränderten Startwerten gerechnet. Zeigen 5 der 20 Läufe Regen, steht dort 25 %.',
       'Nächste 2 Stunden: Statt des Modells zählt das DWD-Regenradar (gemessen und Vorschau, Kennzeichen „R“). Dort zählt die Regenwahrscheinlichkeit nicht.',
-      'Gegenprobe: Die Modelle ECMWF (Europa), GFS (USA) und die DWD-Vorhersage für Nandlstadt werden beim Regen verglichen. Widersprechen sie sich, steht ein „?“ an der Ampel.',
+      'Gegenprobe: Die Modelle ECMWF (Europa), GFS (USA) und die DWD-Vorhersage für Nandlstadt werden beim Regen verglichen. Widersprechen sie sich, steht ein „?“ in der Zeile „Modelle“.',
     ]);
     abschnitt('Symbole unter der Ampel', null, 'Sie zeigen den Grund für Gelb oder Rot: Tropfen = Regen, Tropfen im Kreis = Schauer in der Nähe, Wind, Thermometer = Temperatur, Blitz = Gewitter, Schneeflocke = Glätte, Tropfen über Straße = nasse Straße, Dreieck = DWD-Warnung.');
     abschnitt('Treffsicherheit', null, 'Die App vergleicht laufend, was das Modell 24 Stunden vorher für die letzten ' + CFG.treffsicherheit.tage +

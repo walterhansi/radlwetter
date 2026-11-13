@@ -252,3 +252,4 @@ dialog#erklDlg { width: min(640px, calc(100vw - 24px)); }
   .lbl svg.miniampel { width: 10px; height: 32px; }
   .radampel { gap: 4px; }
 }
+.demo-q { margin-right: 8px; }
