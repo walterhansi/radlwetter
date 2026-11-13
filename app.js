@@ -752,7 +752,7 @@
     e.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + GLYPHEN[s] + '</svg>';
   });
 
-  /* ---------- Erklärung: So entsteht die Ampel (Werte direkt aus config.js) ---------- */
+  /* ---------- Erklärung: So schaltet die Ampel (Werte direkt aus config.js) ---------- */
   function erklaerung() {
     const box = $('erklText');
     box.textContent = '';

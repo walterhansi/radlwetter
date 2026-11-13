@@ -27,7 +27,7 @@ Tabelle (von oben nach unten):
 11. Gefühlte Temperatur °C (zählt für die 10-°C-Grenze)
 12. Wolken % (zählt nicht für die Ampel)
 
-Neben dem Rennrad in der Tabelle eine kleine Ampel als Zeichen für die Ampelzeile. Unten: **Treffsicherheit** der letzten 3 Tage als eine Zeile (Einzelheiten beim Darüberfahren) und die Schaltfläche **„So entsteht die Ampel“** mit einer Erklärung (die Grenzwerte darin kommen direkt aus `config.js`).
+Neben dem Rennrad in der Tabelle eine kleine Ampel als Zeichen für die Ampelzeile. Unten: **Treffsicherheit** der letzten 3 Tage als eine Zeile (Einzelheiten beim Darüberfahren) und die Schaltfläche **„So schaltet die Ampel“** mit einer Erklärung (die Grenzwerte darin kommen direkt aus `config.js`).
 
 Zellen, die gelb oder rot wirken, sind selbst gelb/rot markiert.
 
