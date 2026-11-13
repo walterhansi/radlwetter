@@ -42,6 +42,8 @@
   /* ---------- Abruf Open-Meteo ---------- */
   const HOURLY = 'temperature_2m,apparent_temperature,cloud_cover,precipitation_probability,precipitation,' +
     'wind_speed_10m,wind_gusts_10m,wind_direction_10m,sunshine_duration';
+  // Nur beim gewählten ICON-Modell: Gewitter (Wettercode, Blitzpotenzial nur ICON-D2) und Schnee
+  const HOURLY_ICON = ',weather_code,lightning_potential,snowfall';
 
   function apiUrl(ort, modell, nurRegen) {
     const p = new URLSearchParams({
@@ -55,12 +57,36 @@
     if (nurRegen) {
       p.set('hourly', 'precipitation');
     } else {
-      p.set('hourly', HOURLY);
+      p.set('hourly', HOURLY + (modell ? HOURLY_ICON : ''));
       p.set('minutely_15', 'precipitation');
       p.set('daily', 'sunrise,sunset');
     }
     if (modell) p.set('models', modell);
     return 'https://api.open-meteo.com/v1/forecast?' + p.toString();
+  }
+
+  function ensembleUrl(ort, modell) {
+    const p = new URLSearchParams({
+      latitude: ort.lat, longitude: ort.lon, hourly: 'precipitation', models: modell,
+      forecast_days: '3', timeformat: 'unixtime', timezone: 'auto',
+    });
+    return 'https://ensemble-api.open-meteo.com/v1/ensemble?' + p.toString();
+  }
+
+  // Bright Sky: DWD-Daten (Radar, Stationsvorhersage, Messwerte, Warnungen), nur Deutschland
+  const BS = 'https://api.brightsky.dev/';
+  const isoZeit = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  async function holeJson(url) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 12000);
+    try {
+      const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+      if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+      return await r.json();
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function hole(url) {
@@ -124,15 +150,67 @@
     return { ok, fehlt };
   }
 
+  /** D2-Ensemble: Regenwahrscheinlichkeit aus 20 Läufen. */
+  async function holeEnsemble(ort) {
+    const r = await mitKennungen(CFG.ensemble, (id) => ensembleUrl(ort, id), 'ensemble');
+    const e = L.ensembleAuswerten(r.daten, CFG.regenSchwelle);
+    if (!e) throw new Error('keine Ensemble-Werte');
+    return e;
+  }
+
+  /** DWD-Radar: ab Beginn der laufenden Stunde bis 2 Std. 10 min voraus (gemessen + Vorschau). */
+  async function holeRadar(ort) {
+    const ab = Math.floor(Date.now() / 3600000) * 3600000;
+    const km = CFG.radar.umkreisKm;
+    const url = BS + 'radar?format=plain&lat=' + ort.lat + '&lon=' + ort.lon + '&distance=' + ((km + 2) * 1000) +
+      '&date=' + isoZeit(ab) + '&last_date=' + isoZeit(Date.now() + 130 * 60000);
+    const r = L.radarAuswerten(await holeJson(url), km);
+    if (!r) throw new Error('keine Radarwerte');
+    return r;
+  }
+
+  /** DWD-Stationsvorhersage MOSMIX der nächsten Station. */
+  async function holeMosmix(ort) {
+    const ab = Math.floor(Date.now() / 3600000) * 3600000 - 3600000;
+    const url = BS + 'weather?lat=' + ort.lat + '&lon=' + ort.lon + '&date=' + isoZeit(ab) + '&last_date=' + isoZeit(ab + 3 * 86400000);
+    const m = L.mosmixAuswerten(await holeJson(url), 'DWD');
+    if (!m) throw new Error('keine Stationsvorhersage');
+    return m;
+  }
+
+  async function holeWarnungen(ort) {
+    const w = L.warnungenAuswerten(await holeJson(BS + 'alerts?lat=' + ort.lat + '&lon=' + ort.lon));
+    if (!w) throw new Error('keine Warnungen');
+    return w;
+  }
+
+  /** Zusatzquellen parallel; was fehlschlägt, fehlt nur selbst (Name landet in zusatzFehlt). */
+  async function holeZusatz(ort) {
+    const auftraege = [];
+    if (CFG.ensemble && CFG.ensemble.length) auftraege.push(['ensemble', 'D2-Ensemble', holeEnsemble]);
+    if (CFG.radar && CFG.radar.aktiv) auftraege.push(['radar', 'Radar', holeRadar]);
+    if (CFG.dwdVergleich) auftraege.push(['mosmix', 'DWD-Stationsvorhersage', holeMosmix]);
+    if (CFG.warnungen) auftraege.push(['warnungen', 'DWD-Warnungen', holeWarnungen]);
+    const erg = await Promise.allSettled(auftraege.map((a) => a[2](ort)));
+    const z = { zusatzFehlt: [] };
+    erg.forEach((r, i) => {
+      if (r.status === 'fulfilled') z[auftraege[i][0]] = r.value;
+      else { z[auftraege[i][0]] = null; z.zusatzFehlt.push(auftraege[i][1]); }
+    });
+    return z;
+  }
+
   async function aktualisieren() {
     if (st.laedt) return;
     st.laedt = true;
     st.letzterVersuch = Date.now();
+    st.letzterRadar = Date.now();
     $('neuBtn').classList.add('dreht');
     try {
-      const [haupt, vgl] = await Promise.all([holeHaupt(st.ort), holeVergleich(st.ort)]);
+      const [haupt, vgl, zusatz] = await Promise.all([holeHaupt(st.ort), holeVergleich(st.ort), holeZusatz(st.ort)]);
       haupt.vergleich = vgl.ok;
       haupt.vergleichFehlt = vgl.fehlt;
+      Object.assign(haupt, zusatz);
       st.daten = haupt;
       st.abgerufen = Date.now();
       st.offline = false;
@@ -157,6 +235,51 @@
       $('neuBtn').classList.remove('dreht');
       zeichne();
     }
+    treffAktualisieren();
+  }
+
+  /** Nur das Radar neu holen (alle paar Minuten, das Radar wird alle 5 Minuten neu gerechnet). */
+  async function radarAktualisieren() {
+    if (st.laedt || !st.daten || st.offline || !(CFG.radar && CFG.radar.aktiv)) return;
+    st.letzterRadar = Date.now();
+    try {
+      st.daten.radar = await holeRadar(st.ort);
+      st.daten.zusatzFehlt = (st.daten.zusatzFehlt || []).filter((n) => n !== 'Radar');
+      cacheSchreiben();
+      zeichne();
+    } catch (e) { /* alter Stand bleibt; zu alte Bilder werden ohnehin ignoriert */ }
+  }
+
+  /* ---------- Treffsicherheit (einmal je paar Stunden, eigener Speicher) ---------- */
+  const KEY_TREFF = 'radlwetter.treff';
+  st.treff = sicher(() => {
+    const t = JSON.parse(localStorage.getItem(KEY_TREFF));
+    return t && t.ort && gleicherOrt(t.ort, st.ort) ? t : null;
+  }, null);
+
+  async function treffAktualisieren(erzwingen) {
+    const t = CFG.treffsicherheit;
+    if (!t || st.treffLaedt) return;
+    if (!erzwingen && st.treff && gleicherOrt(st.treff.ort, st.ort) && Date.now() - st.treff.zeit < t.alleStunden * 3600000) return;
+    st.treffLaedt = true;
+    try {
+      const vh = await mitKennungen(CFG.modell, (id) => 'https://previous-runs-api.open-meteo.com/v1/forecast?' + new URLSearchParams({
+        latitude: st.ort.lat, longitude: st.ort.lon, models: id, past_days: String(t.tage), forecast_days: '1',
+        hourly: 'precipitation_previous_day1,wind_speed_10m_previous_day1,wind_gusts_10m_previous_day1,temperature_2m_previous_day1',
+        daily: 'sunrise,sunset', timeformat: 'unixtime', timezone: 'auto', wind_speed_unit: 'kmh',
+      }).toString(), 'vortag');
+      const ab = Math.floor(Date.now() / 3600000) * 3600000 - t.tage * 86400000;
+      const mess = L.messungenAuswerten(await holeJson(BS + 'weather?lat=' + st.ort.lat + '&lon=' + st.ort.lon +
+        '&date=' + isoZeit(ab) + '&last_date=' + isoZeit(Date.now())));
+      const erg = L.treffsicherheit(vh.daten, mess, Date.now() / 1000, CFG);
+      st.treff = { ort: st.ort, zeit: Date.now(), erg };
+      sicher(() => localStorage.setItem(KEY_TREFF, JSON.stringify(st.treff)));
+    } catch (e) {
+      if (!st.treff || !gleicherOrt(st.treff.ort, st.ort)) st.treff = { ort: st.ort, zeit: 0, erg: null, fehler: true };
+    } finally {
+      st.treffLaedt = false;
+      zeichneTreff();
+    }
   }
 
   /* ---------- Darstellung: Hilfen ---------- */
@@ -170,7 +293,7 @@
     rot: '<path d="M7 7l10 10M17 7L7 17"/>',
   };
   const NAMEN = { top: 'besonders gut', gruen: 'gut', gelb: 'mäßig', rot: 'schlecht' };
-  const GRUND = { regen: 'Regen', wind: 'Wind', temp: 'Temperatur' };
+  const GRUND = { regen: 'Regen', wind: 'Wind', temp: 'Temperatur', gewitter: 'Gewitter', nass: 'nasse Straße', glaette: 'Glätte', warnung: 'DWD-Warnung' };
 
   function ampel(stufe) {
     const s = document.createElement('span');
@@ -284,7 +407,7 @@
     const box = el('div', 'ampelbox');
     const wrap = el('div', 'ampelwrap');
     wrap.appendChild(ampel(sp.stufe));
-    if (sp.modellStatus === 'uneinig') wrap.appendChild(el('span', 'badge', '?'));
+    if (sp.unsicher) wrap.appendChild(el('span', 'badge', '?'));
     box.appendChild(wrap);
     const g = el('div', 'gruende');
     sp.ursachen.forEach((u) => g.appendChild(symbol('i-' + u)));
@@ -293,7 +416,9 @@
 
     const teile = [NAMEN[sp.stufe]];
     if (sp.ursachen.length) teile.push('Grund: ' + sp.ursachen.map((u) => GRUND[u]).join(', '));
-    if (sp.modellStatus === 'uneinig') teile.push('Wettermodelle beim Regen uneinig');
+    if (sp.unsicher) teile.push('Wettermodelle beim Regen uneinig');
+    if (sp.radar) teile.push(sp.radarGemessen ? 'Regen laut Radar gemessen' : 'Regen laut Radar-Vorschau');
+    (sp.warnungen || []).forEach((w) => teile.push('DWD: ' + w.ereignis));
     if (sp.topAbgewertet) teile.push('wegen Uneinigkeit nicht „besonders gut“');
     td.title = teile.join(' · ');
   }
@@ -318,6 +443,22 @@
     const min = el('span', 'dauer');
     min.appendChild(wert(sp.regenDauerMin === null ? null : String(sp.regenDauerMin), sp.zellen.regenDauer));
     td.appendChild(min);
+  }
+
+  function gefahrZelle(td, sp) {
+    const z = sp.zellen;
+    const liste = [];
+    if (z.gewitter) liste.push(['gewitter', z.gewitter, sp.gewitterCode ? 'Gewitter vorhergesagt' : (z.gewitter === 'rot' ? 'DWD-Gewitterwarnung' : 'Gewitter möglich (Blitzpotenzial)')]);
+    if (z.glaette) liste.push(['glaette', z.glaette, sp.glaette ? 'Glättegefahr (kalt und nass)' : 'DWD-Glättewarnung']);
+    if (z.nass && !z.glaette) liste.push(['nass', z.nass, 'Straße noch nass (' + mmKomma(sp.regenVorher) + ' mm in den 2 Std. davor)']);
+    if (z.warnung) liste.push(['warnung', z.warnung, 'DWD-Warnung']);
+    const hinweise = (sp.warnungen || []).filter((w) => !w.art);
+    if (!liste.length && !hinweise.length) { td.appendChild(el('span', 'leer', '–')); return; }
+    const box = el('span', 'gefahren');
+    liste.forEach(([id, stufe]) => { const i = el('span', 'gf ' + stufe); i.appendChild(symbol('i-' + id)); box.appendChild(i); });
+    if (!liste.length) { const i = el('span', 'gf hinweis'); i.appendChild(symbol('i-warnung')); box.appendChild(i); }
+    td.appendChild(box);
+    td.title = liste.map((x) => x[2]).concat(hinweise.map((w) => 'DWD-Hinweis: ' + w.ereignis)).join(' · ');
   }
 
   function modellZelle(td, sp) {
@@ -398,10 +539,18 @@
     zeile(beschriftung('Regen', 'mm'), 'regenmm', (td, sp) => {
       zahlZelle('regenMm', mm, 'regenMm')(td, sp);
       if (sp.regenMm !== null && sp.regenMm > 0) td.classList.add('nass');
+      if (sp.radar) {
+        td.classList.add('radar');
+        td.title = sp.radarGemessen ? 'DWD-Radar: gemessen' : 'DWD-Radar: Vorschau (bis 2 Stunden)';
+      }
     });
     zeile(beschriftung('Regendauer', 'min', null, 'Regen je Viertelstunde der Stunde, darunter Minuten mit Regen'), 'regendauer', viertelZelle);
-    zeile(beschriftung('Regen', '%'), 'regenp', zahlZelle('regenProzent', ganz, 'regenProzent'));
+    zeile(beschriftung('Regen', '%', null, 'Regenwahrscheinlichkeit: Anteil der Rechenläufe mit Regen (D2-Ensemble, 20 Läufe; danach ICON-EPS)'), 'regenp', (td, sp) => {
+      zahlZelle('regenProzent', ganz, 'regenProzent')(td, sp);
+      td.title = sp.regenProzentQuelle + (sp.radar ? ' – zählt hier nicht, das Radar ist genauer' : '');
+    });
     zeile(beschriftung('Modelle', 'Regen', null, 'Einigkeit der Wettermodelle beim Regen'), 'modelle', modellZelle);
+    zeile(beschriftung('Gefahr', '', null, 'Gewitter, Glätte, nasse Straße, amtliche DWD-Warnung'), 'gefahr', gefahrZelle);
     zeile(beschriftung('Wind', 'km/h'), 'wind', (td, sp) => {
       const s = ganz(sp.windKmh);
       td.appendChild(wert(s, sp.zellen.wind));
@@ -432,14 +581,14 @@
     const a = L.regenAusblick(st.daten, jetzt, CFG);
     if (a) {
       let text;
-      if (a.status === 'trocken') text = 'Trocken bis ' + wannText(a.bis, offset, heute);
-      else if (a.status === 'regnet') text = a.offen ? 'Es regnet – Ende nicht absehbar' : 'Es regnet – trocken ab ' + wannText(a.bis, offset, heute);
+      if (a.status === 'trocken') text = 'Trocken ' + (a.mindestens ? 'mindestens ' : '') + 'bis ' + wannText(a.bis, offset, heute);
+      else if (a.status === 'regnet') text = a.offen ? 'Es regnet – Ende nicht absehbar' : a.mindestens ? 'Es regnet – mindestens bis ' + wannText(a.bis, offset, heute) : 'Es regnet – trocken ab ' + wannText(a.bis, offset, heute);
       else text = a.bis >= jetzt + CFG.stunden * 3600 - 60 ? 'Kein Regen in den nächsten ' + CFG.stunden + ' Stunden' : 'Kein Regen bis ' + wannText(a.bis, offset, heute);
       ra.classList.add(a.status === 'regnet' ? 'nass' : 'trocken');
       ra.appendChild(symbol('i-regen', 'ra-sym'));
       const rt = el('span', 'ra-text');
       rt.appendChild(el('b', null, text));
-      rt.appendChild(el('span', 'quelle', ' (ICON)'));
+      rt.appendChild(el('span', 'quelle', ' (' + (a.quelle || 'ICON') + (a.quelle && a.quelle.startsWith('Radar') ? ', DWD' : '') + ')'));
       ra.appendChild(rt);
     }
     ra.hidden = !a;
@@ -475,11 +624,29 @@
       ul.appendChild(li);
     });
 
-    // 3) Einigkeit der Wettermodelle beim Regen – deutlich sichtbar
+    // 3) Amtliche DWD-Warnungen für den Ort
+    const wb = $('warnbox');
+    wb.textContent = '';
+    const jetztW = (st.daten.warnungen && st.daten.warnungen.liste || []).filter((w) => w.bis === null || w.bis > jetzt);
+    wb.hidden = !jetztW.length;
+    jetztW.forEach((w) => {
+      const li = el('li', w.art ? 'stark' : '');
+      li.appendChild(symbol(w.art === 'gewitter' ? 'i-gewitter' : w.art === 'glaette' ? 'i-glaette' : 'i-warnung', 'wb-sym'));
+      const t = el('span');
+      t.appendChild(el('b', null, 'DWD-Warnung: ' + w.ereignis.charAt(0) + w.ereignis.slice(1).toLowerCase()));
+      const von = w.von !== null && w.von > jetzt ? 'ab ' + wannText(w.von, offset, heute) : 'jetzt';
+      t.append(' · ' + von + (w.bis !== null ? ' bis ' + wannText(w.bis, offset, heute) : ''));
+      li.appendChild(t);
+      li.title = w.titel;
+      wb.appendChild(li);
+    });
+
+    // 4) Einigkeit der Wettermodelle beim Regen – deutlich sichtbar
     const mh = $('modellhinweis');
     const namen = ['ICON'].concat((st.daten.vergleich || []).map((v) => v.name));
-    const fehlt = st.daten.vergleichFehlt || [];
-    const uneinig = spalten.filter((s) => s.modellStatus === 'uneinig').length;
+    if (st.daten.mosmix) namen.push('DWD ' + (st.daten.mosmix.station ? stationName(st.daten.mosmix.station) : 'Station'));
+    const fehlt = (st.daten.vergleichFehlt || []).concat(st.daten.zusatzFehlt || []);
+    const uneinig = spalten.filter((s) => s.unsicher).length;
     mh.className = 'modellhinweis';
     mh.textContent = '';
     if (namen.length < 2) {
@@ -495,6 +662,36 @@
       mh.textContent = 'Die Wettermodelle (' + namen.join(', ') + ') sind sich beim Regen einig.' +
         (fehlt.length ? ' Ohne ' + fehlt.join(', ') + ' (nicht abrufbar).' : '');
     }
+  }
+
+  /** „NANDLSTADT“ -> „Nandlstadt“ */
+  const stationName = (n) => String(n).toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+
+  /* ---------- Treffsicherheit anzeigen ---------- */
+  const prozent = (a, b) => (b ? Math.round((100 * a) / b) : 0);
+  function zeichneTreff() {
+    const box = $('treff');
+    if (!box) return;
+    const t = st.treff && gleicherOrt(st.treff.ort, st.ort) ? st.treff : null;
+    box.textContent = '';
+    if (!t || (!t.erg && !t.fehler)) { box.hidden = true; return; }
+    box.hidden = false;
+    box.appendChild(el('h2', null, 'Treffsicherheit'));
+    if (!t.erg) { box.appendChild(el('p', 'leise', 'Noch keine Auswertung möglich (Messwerte nicht abrufbar).')); return; }
+    const e = t.erg;
+    const tage = CFG.treffsicherheit.tage;
+    const p = el('p', 'treff-haupt');
+    p.appendChild(el('b', 'gross', prozent(e.gleich, e.stunden) + ' %'));
+    p.append(' – so oft stimmte die Ampel vom Vortag mit dem gemessenen Wetter überein (' + e.stunden + ' Tageslicht-Stunden, letzte ' + tage + ' Tage).');
+    box.appendChild(p);
+    const ul = el('ul', 'treff-liste');
+    const li = (txt) => ul.appendChild(el('li', null, txt));
+    li('zu optimistisch: ' + e.zuGut + ' Std. · zu vorsichtig: ' + e.zuSchlecht + ' Std.');
+    li('Regen ja/nein richtig: ' + prozent(e.regenRichtig, e.regenStunden) + ' % · Regen verpasst: ' + e.regenVerpasst + ' Std. · Fehlalarm: ' + e.regenFehlalarm + ' Std. (gemessen nass: ' + e.regenGemessen + ' Std.)');
+    box.appendChild(ul);
+    const q = el('p', 'leise klein', 'Vergleich: ICON-Vorhersage von 24 Std. vorher gegen DWD-Messwerte (Regen: ' +
+      (e.stationen || []).map(stationName).join(', ') + '; Wind teils von Nachbarstationen). Bewertet werden Regenmenge, Wind, Böen und Lufttemperatur; Stand ' + uhrText(t.zeit) + ' Uhr.');
+    box.appendChild(q);
   }
 
   const uhrText = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -528,6 +725,7 @@
       $('rahmen').hidden = !st.daten;
     }
     kopfinfo(spalten);
+    zeichneTreff();
     statusText();
   }
 
@@ -546,6 +744,7 @@
     sicher(() => localStorage.setItem(KEY_ORT, JSON.stringify(ort)));
     st.daten = null;
     st.offline = false;
+    st.treff = null;
     const c = cacheLesen();
     if (c) { st.daten = c.daten; st.abgerufen = c.abgerufen; }
     zeichne();
@@ -610,7 +809,8 @@
       return;
     }
     const wartezeit = st.fehler || st.offline || !st.daten ? 60000 : CFG.intervallMinuten * 60000;
-    if (jetzt - st.letzterVersuch >= wartezeit) aktualisieren();
+    if (jetzt - st.letzterVersuch >= wartezeit) { aktualisieren(); return; }
+    if (CFG.radar && CFG.radar.aktiv && jetzt - (st.letzterRadar || 0) >= CFG.radar.intervallMinuten * 60000) radarAktualisieren();
   }
   setInterval(takt, 30000);
 

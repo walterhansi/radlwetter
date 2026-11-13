@@ -1,6 +1,6 @@
 # Radlwetter
 
-Eigenständige PWA: Wettervorschau fürs Rennrad. Nächste 48 Stunden, nur Tageslicht (Stunden vor Sonnenaufgang und nach Sonnenuntergang fehlen), mit Ampel.
+Eigenständige PWA: Wettervorschau fürs Rennrad. Nächste 48 Stunden, nur Tageslicht (Stunden vor Sonnenaufgang und nach Sonnenuntergang fehlen), mit Ampel, DWD-Regenradar, amtlichen Warnungen und automatischer Trefferquote.
 
 Live: https://walterhansi.github.io/radlwetter/
 
@@ -10,21 +10,24 @@ Die Bewertung folgt dieser Reihenfolge: 1. möglichst kein Niederschlag, 2. nich
 
 ## Oberfläche
 
-Oben: „Trocken bis …“ bzw. „Regnet bis …“ (aus den Viertelstundenwerten), darunter das **beste Radlfenster je Tag** (mindestens 2 zusammenhängende Stunden, grün oder besonders gut) und ein Hinweis, wenn die Wettermodelle beim Regen uneinig sind.
+Oben: amtliche DWD-Warnungen für den Ort (falls vorhanden), „Trocken bis …“ bzw. „Regnet bis …“ (zuerst DWD-Radar, danach ICON-Viertelstunden; die Quelle steht dahinter), darunter das **beste Radlfenster je Tag** (mindestens 2 zusammenhängende Stunden, grün oder besonders gut) und ein Hinweis, wenn die Wettermodelle beim Regen uneinig sind.
 
 Tabelle (von oben nach unten):
 
-1. **Rennrad** – Ampel; darunter kleine Symbole, **warum** gelb oder rot (Regen, Wind, Temperatur); „?“ = Modelle uneinig
-2. Regen mm
+1. **Rennrad** – Ampel; darunter kleine Symbole, **warum** gelb oder rot (Gewitter, Warnung, Regen, Glätte, nasse Straße, Wind, Temperatur); „?“ = Modelle uneinig
+2. Regen mm – türkis unterstrichen = Wert vom DWD-Radar (gemessen oder 2-Std.-Vorschau)
 3. Regendauer – Viertelstunden-Balken plus Minuten
-4. Regen %
-5. Modelle (Regen) – Vergleich ICON / ECMWF / GFS
-6. Wind km/h mit Richtungspfeil
-7. Böen km/h
-8. Sonne (Minuten)
-9. Temperatur °C
-10. Gefühlte Temperatur °C (zählt für die 10-°C-Grenze)
-11. Wolken % (zählt nicht für die Ampel)
+4. Regen % – Anteil der 20 Läufe des D2-Ensembles mit Regen (danach ICON-EPS)
+5. Modelle (Regen) – Vergleich ICON / ECMWF / GFS / DWD-Stationsvorhersage
+6. Gefahr – Gewitter, Glätte, nasse Straße, DWD-Warnung (Umriss-Dreieck = Hinweis ohne Ampelwirkung, z. B. Frost)
+7. Wind km/h mit Richtungspfeil
+8. Böen km/h
+9. Sonne (Minuten)
+10. Temperatur °C
+11. Gefühlte Temperatur °C (zählt für die 10-°C-Grenze)
+12. Wolken % (zählt nicht für die Ampel)
+
+Unten: **Treffsicherheit** der letzten 7 Tage (siehe unten).
 
 Zellen, die gelb oder rot wirken, sind selbst gelb/rot markiert.
 
@@ -32,25 +35,34 @@ Zellen, die gelb oder rot wirken, sind selbst gelb/rot markiert.
 
 | Stufe | Bedingung (eine genügt) |
 |---|---|
-| rot | Regen ab 1 mm/h, ab 60 %, Wind ab 35 km/h, Böen ab 50 km/h oder gefühlt unter 5 °C |
-| gelb | messbarer Regen (ab 0,1 mm/h oder eine nasse Viertelstunde), Regen ab 30 %, Wind ab 25 km/h, Böen ab 40 km/h oder gefühlt unter 10 °C |
+| rot | Regen ab 1 mm/h, ab 60 %, Wind ab 35 km/h, Böen ab 50 km/h, gefühlt unter 5 °C, **Gewitter** (Wettercode 95/96/99), **Glätte** (Luft ≤ 2 °C und nass/Regen/Schnee) oder **amtliche DWD-Warnung** vor Gewitter, Glätte, Sturm/Orkan, Stark-/Dauerregen, Unwetter |
+| gelb | messbarer Regen (ab 0,1 mm/h oder eine nasse Viertelstunde), Regen ab 30 %, Wind ab 25 km/h, Böen ab 40 km/h, gefühlt unter 10 °C, **nasse Straße** (ab 0,3 mm in den 2 Stunden davor) oder **Blitzpotenzial** ab 1 J/kg (ICON-D2) |
 | grün | sonst |
 | besonders gut | grün **und** Sonne 60 min, 0 mm, Regendauer 0 (fehlt einer der Werte, bleibt es normal grün); bei Modell-Uneinigkeit nur grün |
 
-Die Böen-Grenzen (40/50) sind ein Vorschlag, keine belegten Werte. Angezeigte Werte sind gerundet, die Farbe richtet sich nach dem angezeigten Wert. Fehlende Werte lösen nichts aus.
+Die Böen-Grenzen (40/50), die Blitzpotenzial-Grenze (1 J/kg), die Nässe-Grenze (0,3 mm) und die Glätte-Grenze (2 °C) sind Vorschläge, keine belegten Werte. In Radar-Stunden zählt die Regenwahrscheinlichkeit nicht (das Radar ist dort genauer). Angezeigte Werte sind gerundet, die Farbe richtet sich nach dem angezeigten Wert. Fehlende Werte lösen nichts aus.
 
 ## Unsicherheit
 
-Zusätzlich zu ICON werden ECMWF und GFS nur für den Niederschlag abgefragt. „Uneinig“ heißt: ein Modell ≥ 0,2 mm/h, ein anderes < 0,1 mm/h (`unsicherheit` in `config.js`). Solche Stunden tragen ein „?“, und das beste Fenster nennt die unsicheren Stunden. Ist der Vergleich nicht verfügbar, steht das sichtbar da.
+Zusätzlich zu ICON werden ECMWF, GFS und die DWD-Stationsvorhersage MOSMIX (nächste Station, für Moosburg Nandlstadt) nur für den Niederschlag abgefragt. „Uneinig“ heißt: ein Modell ≥ 0,2 mm/h, ein anderes < 0,1 mm/h (`unsicherheit` in `config.js`). Solche Stunden tragen ein „?“, und das beste Fenster nennt die unsicheren Stunden; in Radar-Stunden entfällt das „?“. Ist der Vergleich nicht verfügbar, steht das sichtbar da.
+
+## Radar
+
+DWD-Radarkomposit RV über Bright Sky (`/radar`, 1 km, alle 5 Minuten, gemessen + Vorschau bis 2 Stunden). Je 5-Minuten-Bild zählt der höchste Wert im Umkreis von 1 km. Eine Stunde nutzt das Radar nur, wenn alle 12 Bilder da sind (meist die laufende und die nächste Stunde). „Regen“ im Ausblick ab 0,02 mm je 5 Minuten (`radar` in `config.js`). Das Radar wird alle 5 Minuten neu geholt.
+
+## Treffsicherheit
+
+Alle 6 Stunden vergleicht die App die ICON-Vorhersage von 24 Stunden vorher (Open-Meteo Previous Runs API) mit den DWD-Messwerten der letzten 7 Tage (Bright Sky: Regen meist Nandlstadt, Wind/Böen teils Nachbarstationen wie München-Flughafen). Bewertet werden Regenmenge, Wind, Böen und Lufttemperatur, nur Tageslicht-Stunden. Angezeigt: wie oft die Ampelfarbe übereinstimmt, wie oft sie zu optimistisch bzw. zu vorsichtig war, und wie oft „Regen ja/nein“ stimmte. Damit lassen sich die Grenzwerte begründet nachstellen.
 
 ## Daten
 
-Open-Meteo, ICON (`icon_seamless`), Vergleich ECMWF und GFS. Die Modell-Kennungen werden der Reihe nach probiert (nur bei HTTP 400); die funktionierende merkt sich das Gerät. Fehlt beim Hauptmodell etwas (Regenwahrscheinlichkeit, Böen, gefühlte Temperatur, Viertelstundenwerte), folgt ein zweiter Abruf ohne Modellwahl.
+Open-Meteo: ICON (`icon_seamless`, dazu Wettercode, Blitzpotenzial, Schnee), D2-Ensemble (`ensemble-api`, `icon_d2`), Vergleich ECMWF und GFS, Vorhersage vom Vortag (`previous-runs-api`). Deutscher Wetterdienst über Bright Sky (kostenlos, ohne Schlüssel, nur Deutschland): Radar, Stationsvorhersage MOSMIX, Messwerte, Warnungen. Fällt eine Zusatzquelle aus, fehlt nur sie (Hinweis unter „Modelle“). Die Modell-Kennungen werden der Reihe nach probiert (nur bei HTTP 400); die funktionierende merkt sich das Gerät. Fehlt beim Hauptmodell etwas (Regenwahrscheinlichkeit, Böen, gefühlte Temperatur, Viertelstundenwerte), folgt ein zweiter Abruf ohne Modellwahl.
 
 - Regen mm, Regen %, Sonne und Böen sind bei Open-Meteo Werte der **vorangegangenen** Stunde. Die Spalte „19“ (19–20 Uhr) zeigt deshalb den Eintrag mit Zeitstempel 20:00. Temperatur, Wolken und Wind gelten für den Zeitstempel selbst.
 - Regendauer = Viertelstunden mit mindestens 0,1 mm (`regenSchwelle`) mal 15.
 - Nacht: Eine Stunde bleibt, wenn sie sich mit der Zeit zwischen Sonnenauf- und -untergang überschneidet.
-- Abruf beim Laden, alle 15 Minuten, bei Stundenwechsel und bei Rückkehr zum Tab. Ohne Verbindung zeigt die App gespeicherte Daten (bis 6 Stunden alt).
+- Hinweis: Open-Meteo stellt ICON nach dem 30.11.2026 auf native Gitter um. `icon_seamless` sollte weiterlaufen; falls nicht, greift die Ausweichkette (andere Kennung, dann Abruf ohne Modellwahl).
+- Abruf beim Laden, alle 15 Minuten (Radar alle 5 Minuten), bei Stundenwechsel und bei Rückkehr zum Tab. Ohne Verbindung zeigt die App gespeicherte Daten (bis 6 Stunden alt).
 - Ort: Standard Moosburg (48,47 / 11,94); über das Orts-Symbol änderbar (Suche), wird im Gerät gespeichert.
 
 ## Dateien
@@ -63,4 +75,4 @@ Nach dem Push auf `main` ist die Seite per GitHub Pages in ca. 1 Minute online (
 
 ## Tests
 
-`node tests/logik.test.js` prüft Stundenzuordnung, Regendauer, Nachtfilter, Ampelgrenzen, Rundung, Modellvergleich und Fenster mit simulierten Daten (`tests/simdaten.js`, `tests/szenario.js`).
+`node tests/logik.test.js` prüft Stundenzuordnung, Regendauer, Nachtfilter, Ampelgrenzen, Rundung, Modellvergleich, Fenster, Radar, D2-Ensemble, DWD-Vergleich, Gewitter, Nässe, Glätte, Warnungen und Treffsicherheit mit simulierten Daten (`tests/simdaten.js`, `tests/szenario.js`).
