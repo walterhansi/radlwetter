@@ -1,7 +1,7 @@
 /* Radlwetter – Einstellungen. Hier stehen alle Grenzwerte und Vorgaben. */
 const RADL_CONFIG = {
   // Wird bei jeder Änderung hochgezählt; der Service Worker nutzt sie als Cache-Name.
-  version: '1.3.0',
+  version: '1.4.0',
 
   // Standard-Ort (im Programm per Ortswahl änderbar)
   ort: { name: 'Moosburg', lat: 48.47, lon: 11.94 },
@@ -45,7 +45,7 @@ const RADL_CONFIG = {
   glaette: { tempMax: 2 },
 
   // Treffsicherheit: Vorhersage vom Vortag gegen DWD-Messwerte der letzten Tage
-  treffsicherheit: { tage: 7, alleStunden: 6 },
+  treffsicherheit: { tage: 3, alleStunden: 6 },
 
   // Regendauer: Viertelstunden mit mindestens so viel Regen (mm) zählen als nass
   regenSchwelle: 0.1,

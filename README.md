@@ -27,7 +27,7 @@ Tabelle (von oben nach unten):
 11. Gefühlte Temperatur °C (zählt für die 10-°C-Grenze)
 12. Wolken % (zählt nicht für die Ampel)
 
-Unten: **Treffsicherheit** der letzten 7 Tage (siehe unten).
+Neben dem Rennrad in der Tabelle eine kleine Ampel als Zeichen für die Ampelzeile. Unten: **Treffsicherheit** der letzten 3 Tage als eine Zeile (Einzelheiten beim Darüberfahren) und die Schaltfläche **„So entsteht die Ampel“** mit einer Erklärung (die Grenzwerte darin kommen direkt aus `config.js`).
 
 Zellen, die gelb oder rot wirken, sind selbst gelb/rot markiert.
 
@@ -54,7 +54,7 @@ Umkreis: Zusätzlich wertet die App je Radarbild den Kreis von 5 km aus (rund 80
 
 ## Treffsicherheit
 
-Alle 6 Stunden vergleicht die App die ICON-Vorhersage von 24 Stunden vorher (Open-Meteo Previous Runs API) mit den DWD-Messwerten der letzten 7 Tage (Bright Sky: Regen meist Nandlstadt, Wind/Böen teils Nachbarstationen wie München-Flughafen). Bewertet werden Regenmenge, Wind, Böen und Lufttemperatur, nur Tageslicht-Stunden. Angezeigt: wie oft die Ampelfarbe übereinstimmt, wie oft sie zu optimistisch bzw. zu vorsichtig war, und wie oft „Regen ja/nein“ stimmte. Damit lassen sich die Grenzwerte begründet nachstellen.
+Alle 6 Stunden vergleicht die App die ICON-Vorhersage von 24 Stunden vorher (Open-Meteo Previous Runs API) mit den DWD-Messwerten der letzten 3 Tage (Bright Sky: Regen meist Nandlstadt, Wind/Böen teils Nachbarstationen wie München-Flughafen). Bewertet werden Regenmenge, Wind, Böen und Lufttemperatur, nur Tageslicht-Stunden. Angezeigt: wie oft die Ampelfarbe übereinstimmt, wie oft sie zu optimistisch bzw. zu vorsichtig war, und wie oft „Regen ja/nein“ stimmte. Damit lassen sich die Grenzwerte begründet nachstellen.
 
 ## Daten
 

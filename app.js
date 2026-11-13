@@ -255,13 +255,13 @@
   const KEY_TREFF = 'radlwetter.treff';
   st.treff = sicher(() => {
     const t = JSON.parse(localStorage.getItem(KEY_TREFF));
-    return t && t.ort && gleicherOrt(t.ort, st.ort) ? t : null;
+    return t && t.ort && gleicherOrt(t.ort, st.ort) && t.tage === (CFG.treffsicherheit && CFG.treffsicherheit.tage) ? t : null;
   }, null);
 
   async function treffAktualisieren(erzwingen) {
     const t = CFG.treffsicherheit;
     if (!t || st.treffLaedt) return;
-    if (!erzwingen && st.treff && gleicherOrt(st.treff.ort, st.ort) && Date.now() - st.treff.zeit < t.alleStunden * 3600000) return;
+    if (!erzwingen && st.treff && gleicherOrt(st.treff.ort, st.ort) && st.treff.tage === t.tage && Date.now() - st.treff.zeit < t.alleStunden * 3600000) return;
     st.treffLaedt = true;
     try {
       const vh = await mitKennungen(CFG.modell, (id) => 'https://previous-runs-api.open-meteo.com/v1/forecast?' + new URLSearchParams({
@@ -273,7 +273,7 @@
       const mess = L.messungenAuswerten(await holeJson(BS + 'weather?lat=' + st.ort.lat + '&lon=' + st.ort.lon +
         '&date=' + isoZeit(ab) + '&last_date=' + isoZeit(Date.now())));
       const erg = L.treffsicherheit(vh.daten, mess, Date.now() / 1000, CFG);
-      st.treff = { ort: st.ort, zeit: Date.now(), erg };
+      st.treff = { ort: st.ort, zeit: Date.now(), erg, tage: t.tage };
       sicher(() => localStorage.setItem(KEY_TREFF, JSON.stringify(st.treff)));
     } catch (e) {
       if (!st.treff || !gleicherOrt(st.treff.ort, st.ort)) st.treff = { ort: st.ort, zeit: 0, erg: null, fehler: true };
@@ -534,7 +534,17 @@
       if (s === null) td.classList.add('leer');
     };
 
-    const radKopf = beschriftung('', '', radSymbol(), 'Eignung fürs Rennrad');
+    const radAmpel = el('span', 'radampel');
+    radAmpel.appendChild(radSymbol());
+    const mini = document.createElementNS(NS, 'svg');
+    mini.setAttribute('viewBox', '0 0 12 30');
+    mini.setAttribute('class', 'miniampel');
+    mini.setAttribute('aria-hidden', 'true');
+    mini.innerHTML = '<rect x="0.5" y="0.5" width="11" height="29" rx="4" fill="#0d1424" stroke="rgba(255,255,255,.55)"/>' +
+      '<circle cx="6" cy="6.3" r="3.6" fill="var(--rot)"/><circle cx="6" cy="15" r="3.6" fill="var(--gelb)"/>' +
+      '<circle cx="6" cy="23.7" r="3.6" fill="var(--gruen)"/>';
+    radAmpel.appendChild(mini);
+    const radKopf = beschriftung('', '', radAmpel, 'Eignung fürs Rennrad');
     radKopf.firstChild.setAttribute('aria-label', 'Eignung fürs Rennrad');
     zeile(radKopf, 'eignung', eignungZelle);
 
@@ -687,22 +697,16 @@
     box.textContent = '';
     if (!t || (!t.erg && !t.fehler)) { box.hidden = true; return; }
     box.hidden = false;
-    box.appendChild(el('h2', null, 'Treffsicherheit'));
-    if (!t.erg) { box.appendChild(el('p', 'leise', 'Noch keine Auswertung möglich (Messwerte nicht abrufbar).')); return; }
-    const e = t.erg;
     const tage = CFG.treffsicherheit.tage;
-    const p = el('p', 'treff-haupt');
-    p.appendChild(el('b', 'gross', prozent(e.gleich, e.stunden) + ' %'));
-    p.append(' – so oft stimmte die Ampel vom Vortag mit dem gemessenen Wetter überein (' + e.stunden + ' Tageslicht-Stunden, letzte ' + tage + ' Tage).');
-    box.appendChild(p);
-    const ul = el('ul', 'treff-liste');
-    const li = (txt) => ul.appendChild(el('li', null, txt));
-    li('zu optimistisch: ' + e.zuGut + ' Std. · zu vorsichtig: ' + e.zuSchlecht + ' Std.');
-    li('Regen ja/nein richtig: ' + prozent(e.regenRichtig, e.regenStunden) + ' % · Regen verpasst: ' + e.regenVerpasst + ' Std. · Fehlalarm: ' + e.regenFehlalarm + ' Std. (gemessen nass: ' + e.regenGemessen + ' Std.)');
-    box.appendChild(ul);
-    const q = el('p', 'leise klein', 'Vergleich: ICON-Vorhersage von 24 Std. vorher gegen DWD-Messwerte (Regen: ' +
-      (e.stationen || []).map(stationName).join(', ') + '; Wind teils von Nachbarstationen). Bewertet werden Regenmenge, Wind, Böen und Lufttemperatur; Stand ' + uhrText(t.zeit) + ' Uhr.');
-    box.appendChild(q);
+    if (!t.erg) { box.appendChild(el('span', 'leise', 'Treffsicherheit: noch keine Auswertung möglich (Messwerte nicht abrufbar).')); return; }
+    const e = t.erg;
+    box.appendChild(el('b', 'gross', prozent(e.gleich, e.stunden) + ' %'));
+    box.append(' so oft stimmte die Ampel in den letzten ' + tage + ' Tagen');
+    // Einzelheiten nur beim Darüberfahren bzw. langen Antippen
+    box.title = 'Ampel vom Vortag gegen gemessenes Wetter, ' + e.stunden + ' Tageslicht-Stunden · zu optimistisch: ' + e.zuGut +
+      ' Std. · zu vorsichtig: ' + e.zuSchlecht + ' Std. · Regen ja/nein richtig: ' + prozent(e.regenRichtig, e.regenStunden) +
+      ' % (verpasst ' + e.regenVerpasst + ', Fehlalarm ' + e.regenFehlalarm + ') · Messung: ' + (e.stationen || []).map(stationName).join(', ') +
+      ' · Stand ' + uhrText(t.zeit) + ' Uhr';
   }
 
   const uhrText = (ms) => new Date(ms).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -745,6 +749,51 @@
     const s = e.dataset.s;
     e.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + GLYPHEN[s] + '</svg>';
   });
+
+  /* ---------- Erklärung: So entsteht die Ampel (Werte direkt aus config.js) ---------- */
+  function erklaerung() {
+    const box = $('erklText');
+    box.textContent = '';
+    const r = CFG.grenzen.rot;
+    const g = CFG.grenzen.gelb;
+    const km = (CFG.radar && CFG.radar.nahKm) || 5;
+    const z = (v) => String(v).replace('.', ',');
+    const abschnitt = (titel, punkte, einleitung) => {
+      box.appendChild(el('h3', null, titel));
+      if (einleitung) box.appendChild(el('p', null, einleitung));
+      if (punkte) { const ul = el('ul'); punkte.forEach((p) => ul.appendChild(el('li', null, p))); box.appendChild(ul); }
+    };
+    abschnitt('Grundidee', null, 'Jede Stunde wird für sich bewertet. Es gilt die Reihenfolge deiner Wichtigkeit: kein Regen, wenig Wind, Sonne, warm genug. Schon eine einzige Bedingung genügt für Rot bzw. Gelb.');
+    abschnitt('Rot – schlecht, wenn eines davon zutrifft', [
+      'Regen ab ' + z(r.regenMm) + ' mm in der Stunde oder Regenwahrscheinlichkeit ab ' + r.regenProzent + ' %',
+      'Wind ab ' + r.windKmh + ' km/h oder Böen ab ' + r.boeenKmh + ' km/h',
+      'gefühlte Temperatur unter ' + r.tempUnter + ' °C',
+      'Gewitter vorhergesagt',
+      'Glätte: Luft höchstens ' + z(CFG.glaette.tempMax) + ' °C und Straße nass, Regen oder Schnee',
+      'amtliche DWD-Warnung vor Gewitter, Glätte, Sturm oder Starkregen',
+    ]);
+    abschnitt('Gelb – mäßig, wenn eines davon zutrifft', [
+      'Regen ab ' + z(g.regenMm) + ' mm, mindestens ' + g.regenDauerMin + ' Minuten Regen oder Regenwahrscheinlichkeit ab ' + g.regenProzent + ' %',
+      'Wind ab ' + g.windKmh + ' km/h oder Böen ab ' + g.boeenKmh + ' km/h',
+      'gefühlte Temperatur unter ' + g.tempUnter + ' °C',
+      'Straße noch nass: ab ' + z(CFG.nasseStrasse.mm) + ' mm Regen in den 2 Stunden davor',
+      'Blitzgefahr (Gewitter möglich)',
+      'Schauer in der Nähe: Radar zeigt Regen auf mindestens ' + CFG.radar.nahAnteilProzent + ' % der Fläche im Umkreis von ' + km + ' km',
+    ]);
+    abschnitt('Grün – gut', null, 'Keine der Bedingungen trifft zu. Dunkelgrün mit weißem Ring heißt „besonders gut“: zusätzlich die volle Stunde Sonne, kein Tropfen Regen und die Wettermodelle sind sich einig.');
+    abschnitt('Woher die Werte kommen', [
+      'Wettermodell ICON des Deutschen Wetterdienstes, in den ersten 2 Tagen mit 2 km feinem Raster.',
+      'Regenwahrscheinlichkeit: Das feine Modell wird 20-mal mit leicht veränderten Startwerten gerechnet. Zeigen 5 der 20 Läufe Regen, steht dort 25 %.',
+      'Nächste 2 Stunden: Statt des Modells zählt das DWD-Regenradar (gemessen und Vorschau, Kennzeichen „R“). Dort zählt die Regenwahrscheinlichkeit nicht.',
+      'Gegenprobe: Die Modelle ECMWF (Europa), GFS (USA) und die DWD-Vorhersage für Nandlstadt werden beim Regen verglichen. Widersprechen sie sich, steht ein „?“ an der Ampel.',
+    ]);
+    abschnitt('Symbole unter der Ampel', null, 'Sie zeigen den Grund für Gelb oder Rot: Tropfen = Regen, Tropfen im Kreis = Schauer in der Nähe, Wind, Thermometer = Temperatur, Blitz = Gewitter, Schneeflocke = Glätte, Tropfen über Straße = nasse Straße, Dreieck = DWD-Warnung.');
+    abschnitt('Treffsicherheit', null, 'Die App vergleicht laufend, was das Modell 24 Stunden vorher für die letzten ' + CFG.treffsicherheit.tage +
+      ' Tage vorhergesagt hat, mit den Messwerten der DWD-Stationen. Die Prozentzahl sagt, wie oft die Ampelfarbe gestimmt hat (nur Tageslicht-Stunden).');
+    abschnitt('Gut zu wissen', null, 'Einige Grenzen sind Vorschläge und keine wissenschaftlich belegten Werte: Böen 40/50 km/h, nasse Straße, Glätte, Blitzgefahr und Schauer in der Nähe. Mit der Treffsicherheit lassen sie sich mit der Zeit begründet anpassen.');
+  }
+  $('erklBtn').addEventListener('click', () => { erklaerung(); $('erklDlg').showModal(); });
+  $('erklDlg').addEventListener('click', (e) => { if (e.target === $('erklDlg')) $('erklDlg').close(); });
 
   /* ---------- Ortswahl ---------- */
   const dlg = $('ortDlg');
