@@ -337,4 +337,180 @@ test('Lokale Zeit aus Unixzeit mit Offset', () => {
   assert.equal(L.lokaleStunde(JETZT, -3600 * 5), 7);
 });
 
+/* ---------- v1.2: Radar, D2-Ensemble, DWD-Vergleich, Gewitter, Nässe, Glätte, Warnungen, Treffsicherheit ---------- */
+const iso = (sek) => new Date(sek * 1000).toISOString();
+const STD = (tag0, std, min = 0) => tag0 + std * H + min * 60;
+
+test('D2-Ensemble: Anteil der Läufe mit Regen ersetzt die Regenwahrscheinlichkeit', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  const hourly = { time: daten.hourly.time.slice(), precipitation: daten.hourly.time.map(() => 0) };
+  for (let k = 1; k < 20; k++) hourly['precipitation_member' + String(k).padStart(2, '0')] = daten.hourly.time.map(() => 0);
+  const i = daten.hourly.time.indexOf(STD(tag0, 16)); // Stunde 15–16 Uhr
+  ['precipitation', 'precipitation_member01', 'precipitation_member02', 'precipitation_member03', 'precipitation_member04'].forEach((k) => { hourly[k][i] = 0.3; });
+  hourly.precipitation_member05[i] = 0.05; // unter 0,1 mm zählt nicht
+  const ens = L.ensembleAuswerten({ hourly }, CFG.regenSchwelle);
+  assert.equal(ens.laeufe, 20);
+  assert.equal(ens.prob[i], 25);
+  daten.ensemble = ens;
+  daten.hourly.precipitation_probability[i] = 80;
+  const s15 = spalte(daten, 15);
+  assert.equal(s15.regenProzent, 25);
+  assert.equal(s15.regenProzentQuelle, 'D2-Ensemble');
+  assert.equal(s15.zellen.regenProzent, null);
+});
+
+function radarAntwort(tag0, abStd, minuten, wert = () => 0, standMin = 0) {
+  const stand = STD(tag0, abStd, standMin);
+  const radar = [];
+  for (let m = 0; m <= minuten; m += 5) {
+    const ts = STD(tag0, abStd, m);
+    const v = wert(ts);
+    const g = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    if (v) g[0][2] = v; // Regen ein Pixel daneben (Umkreis 1 km zählt)
+    radar.push({ timestamp: iso(ts), source: 'RADARCOMP::RV::' + iso(Math.min(ts, stand)), precipitation_5: g });
+  }
+  return { radar, latlon_position: { x: 1.2, y: 1.4 } };
+}
+
+test('Radar: Umkreis-Maximum, Stand der Messung, Stunde aus 12 Bildern', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  // 14:00–16:55, Messung bis 14:50, Regen 15:20–15:40 (je 5 min 0,10 mm)
+  const r = L.radarAuswerten(radarAntwort(tag0, 14, 175, (ts) => (ts > STD(tag0, 15, 15) && ts <= STD(tag0, 15, 40) ? 10 : 0), 50), 1);
+  assert.equal(r.stand, STD(tag0, 14, 50));
+  assert.equal(r.bilder.find((b) => b.ts === STD(tag0, 15, 20)).mm, 0.1);
+  assert.equal(L.radarAuswerten(radarAntwort(tag0, 14, 30, () => 10), 0).bilder[1].mm, 0, 'ohne Umkreis kein Treffer');
+  daten.radar = r;
+  daten.hourly.precipitation[daten.hourly.time.indexOf(STD(tag0, 15))] = 2; // Modell: Regen 14–15 Uhr
+  daten.hourly.precipitation_probability[daten.hourly.time.indexOf(STD(tag0, 15))] = 90;
+  const s14 = spalte(daten, 14);
+  assert.equal(s14.radar, true);
+  assert.equal(s14.regenMm, 0, 'Radar sticht Modell');
+  assert.equal(s14.stufe === 'gruen' || s14.stufe === 'top', true, 'Wahrscheinlichkeit zählt in Radar-Stunden nicht');
+  assert.equal(s14.modelle[0].mm, 2, 'Modellvergleich zeigt weiter den Modellwert');
+  const s15 = spalte(daten, 15);
+  assert.equal(s15.radar, true);
+  assert.equal(s15.regenMm, 0.5);
+  assert.deepEqual(s15.viertel, [0, 0.3, 0.2, 0]);
+  assert.equal(s15.regenDauerMin, 30);
+  assert.equal(s15.stufe, 'gelb');
+  assert.equal(spalte(daten, 16).radar, false, 'nicht vollständig abgedeckt -> Modell');
+});
+
+test('Regenausblick mit Radar: trocken bis, regnet bis, danach Modell', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  daten.radar = L.radarAuswerten(radarAntwort(tag0, 14, 175, (ts) => (ts > STD(tag0, 15, 30) && ts <= STD(tag0, 15, 45) ? 5 : 0), 50), 1);
+  let a = L.regenAusblick(daten, JETZT, CFG);
+  assert.equal(a.status, 'trocken'); assert.equal(a.quelle, 'Radar'); assert.equal(a.bis, STD(tag0, 15, 30));
+  daten.radar = L.radarAuswerten(radarAntwort(tag0, 14, 175, (ts) => (ts <= STD(tag0, 15, 10) ? 8 : 0), 50), 1);
+  a = L.regenAusblick(daten, JETZT, CFG);
+  assert.equal(a.status, 'regnet'); assert.equal(a.bis, STD(tag0, 15, 10)); assert.equal(a.quelle, 'Radar');
+  // Radar trocken bis zum Ende, Modell meldet Regen um 18 Uhr
+  daten.radar = L.radarAuswerten(radarAntwort(tag0, 14, 175), 1);
+  daten.minutely_15.precipitation[daten.minutely_15.time.indexOf(STD(tag0, 18, 15))] = 0.3;
+  a = L.regenAusblick(daten, JETZT, CFG);
+  assert.equal(a.status, 'trocken'); assert.equal(a.bis, STD(tag0, 18)); assert.equal(a.quelle, 'Radar + ICON');
+  // veraltetes Radar wird ignoriert
+  daten.radar = L.radarAuswerten(radarAntwort(tag0, 11, 60), 1);
+  assert.equal(L.regenAusblick(daten, JETZT, CFG).quelle, 'ICON');
+});
+
+test('Gewitter: Wettercode 95 rot, Blitzpotenzial gelb', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  const n = daten.hourly.time.length;
+  daten.hourly.weather_code = Array(n).fill(2);
+  daten.hourly.lightning_potential = Array(n).fill(0);
+  daten.hourly.weather_code[daten.hourly.time.indexOf(STD(tag0, 17))] = 95; // Stunde 16–17
+  daten.hourly.lightning_potential[daten.hourly.time.indexOf(STD(tag0, 15))] = 3; // Stunde 14 und 15
+  const s16 = spalte(daten, 16);
+  assert.equal(s16.stufe, 'rot'); assert.deepEqual(s16.ursachen, ['gewitter']);
+  assert.equal(spalte(daten, 15).stufe, 'gelb');
+  assert.equal(spalte(daten, 17).stufe, 'rot', 'Code am Zeitstempel zählt auch für die Stunde danach');
+});
+
+test('Nasse Straße gelb, Glätte rot', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  const ix = (std) => daten.hourly.time.indexOf(STD(tag0, std));
+  daten.hourly.precipitation[ix(15)] = 0.5; // Regen 14–15 Uhr
+  const s15 = spalte(daten, 15);
+  assert.equal(s15.strasseNass, true); assert.equal(s15.stufe, 'gelb'); assert.deepEqual(s15.ursachen, ['nass']);
+  assert.equal(spalte(daten, 16).strasseNass, true, 'noch nass 2 Std. danach');
+  assert.equal(spalte(daten, 17).strasseNass, false);
+  daten.hourly.temperature_2m[ix(16)] = 1.5;
+  daten.hourly.apparent_temperature[ix(16)] = 12; // gefühlt warm hilft nicht gegen Eis
+  const s16 = spalte(daten, 16);
+  assert.equal(s16.glaette, true); assert.equal(s16.stufe, 'rot'); assert.deepEqual(s16.ursachen, ['glaette']);
+  daten.hourly.temperature_2m[ix(17)] = 0; daten.hourly.apparent_temperature[ix(17)] = 12;
+  assert.equal(spalte(daten, 17).glaette, false, 'trocken und kalt ist keine Glätte');
+});
+
+test('Amtliche Warnungen: Gewitter rot, Frost nur Hinweis', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  daten.warnungen = L.warnungenAuswerten({
+    location: { name: 'Stadt Moosburg a.d. Isar' },
+    alerts: [
+      { status: 'actual', event_de: 'GEWITTER', headline_de: 'Amtliche WARNUNG vor GEWITTER', severity: 'minor', onset: iso(STD(tag0, 16, 30)), expires: iso(STD(tag0, 17, 30)) },
+      { status: 'actual', event_de: 'FROST', headline_de: 'Amtliche WARNUNG vor FROST', severity: 'minor', onset: iso(STD(tag0, 14)), expires: null },
+      { status: 'test', event_de: 'ORKANBÖEN', onset: iso(STD(tag0, 14)), expires: null },
+    ],
+  });
+  assert.equal(daten.warnungen.ort, 'Stadt Moosburg a.d. Isar');
+  assert.equal(daten.warnungen.liste.length, 2);
+  assert.equal(spalte(daten, 15).stufe === 'gruen' || spalte(daten, 15).stufe === 'top', true);
+  assert.equal(spalte(daten, 15).warnungen.length, 1);
+  assert.equal(spalte(daten, 16).stufe, 'rot');
+  assert.equal(spalte(daten, 17).stufe, 'rot');
+  assert.deepEqual(spalte(daten, 17).ursachen, ['gewitter']);
+  assert.equal(spalte(daten, 18).warnungen.length, 1);
+});
+
+test('DWD-Stationsvorhersage zählt als Vergleichsmodell; in Radar-Stunden kein „unsicher“', () => {
+  const { daten, tag0 } = erzeuge(JETZT);
+  const weather = [];
+  for (let s = 14; s <= 20; s++) weather.push({ timestamp: iso(STD(tag0, s)), source_id: 1, precipitation: s === 17 ? 0.8 : 0 });
+  weather.push({ timestamp: iso(STD(tag0, 13)), source_id: 2, precipitation: 5 }); // Messung, nicht Vorhersage
+  daten.mosmix = L.mosmixAuswerten({ sources: [{ id: 1, observation_type: 'forecast', station_name: 'NANDLSTADT' }, { id: 2, observation_type: 'historical' }], weather }, 'DWD');
+  assert.equal(daten.mosmix.station, 'NANDLSTADT');
+  assert.equal(daten.mosmix.hourly.time.length, 7);
+  const s16 = spalte(daten, 16);
+  assert.equal(s16.modellStatus, 'uneinig');
+  assert.equal(s16.unsicher, true);
+  assert.deepEqual(s16.modelle.map((m) => m.name), ['ICON', 'DWD']);
+  daten.radar = L.radarAuswerten(radarAntwort(tag0, 16, 60), 1);
+  assert.equal(spalte(daten, 16).unsicher, false);
+});
+
+test('Treffsicherheit: Vorhersage vom Vortag gegen Messung', () => {
+  const tag0 = Date.UTC(2026, 9, 16, 22) / 1000; // 17.10. 0 Uhr MESZ
+  const time = Array.from({ length: 24 }, (_, i) => tag0 + i * H);
+  const vh = {
+    hourly: {
+      time,
+      precipitation_previous_day1: time.map(() => 0),
+      wind_speed_10m_previous_day1: time.map(() => 10),
+      wind_gusts_10m_previous_day1: time.map(() => 20),
+      temperature_2m_previous_day1: time.map(() => 15),
+    },
+    daily: { sunrise: [tag0 + 8 * H], sunset: [tag0 + 12 * H] }, // Tageslicht 8–12 Uhr -> 4 Stunden (8,9,10,11)
+  };
+  vh.hourly.precipitation_previous_day1[10] = 0.5; // Regen 9–10 vorhergesagt
+  const werte = new Map(time.map((t) => [t, { regenMm: 0, windKmh: 10, boeenKmh: 20, temp: 15 }]));
+  werte.get(tag0 + 12 * H).regenMm = 1.2; // gemessen Regen 11–12 (verpasst, rot)
+  const m = { werte, stationen: ['Nandlstadt'] };
+  const t = L.treffsicherheit(vh, m, tag0 + 20 * H, CFG);
+  assert.equal(t.stunden, 4);
+  assert.equal(t.gleich, 2);
+  assert.equal(t.zuSchlecht, 1);
+  assert.equal(t.zuGut, 1);
+  assert.equal(t.regenRichtig, 2); assert.equal(t.regenFehlalarm, 1); assert.equal(t.regenVerpasst, 1);
+  const mw = L.messungenAuswerten({
+    sources: [{ id: 5, observation_type: 'historical', station_name: 'Nandlstadt' }, { id: 6, observation_type: 'forecast', station_name: 'NANDLSTADT' }, { id: 7, observation_type: 'historical', station_name: 'München-Flughafen' }],
+    weather: [
+      { timestamp: iso(tag0), source_id: 5, precipitation: 0, wind_speed: 7, wind_gust_speed: 12, temperature: 4, fallback_source_ids: { wind_speed: 7 } },
+      { timestamp: iso(tag0 + H), source_id: 6, precipitation: 3 },
+    ],
+  });
+  assert.equal(mw.werte.size, 1);
+  assert.deepEqual(mw.stationen.sort(), ['München-Flughafen', 'Nandlstadt']);
+});
+
 console.log('\n' + nTests + ' Tests bestanden');

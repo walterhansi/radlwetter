@@ -12,8 +12,112 @@
 
   const zahl = (x) => (typeof x === 'number' && isFinite(x) ? x : null);
   const hatWerte = (arr) => Array.isArray(arr) && arr.some((v) => zahl(v) !== null);
-  const GRUPPEN = { regenMm: 'regen', regenProzent: 'regen', regenDauer: 'regen', wind: 'wind', boeen: 'wind', temp: 'temp', gefuehlt: 'temp' };
-  const GRUPPEN_REIHENFOLGE = ['regen', 'wind', 'temp'];
+  const GRUPPEN = {
+    regenMm: 'regen', regenProzent: 'regen', regenDauer: 'regen', wind: 'wind', boeen: 'wind', temp: 'temp', gefuehlt: 'temp',
+    gewitter: 'gewitter', nass: 'nass', glaette: 'glaette', warnung: 'warnung',
+  };
+  const GRUPPEN_REIHENFOLGE = ['gewitter', 'warnung', 'regen', 'glaette', 'nass', 'wind', 'temp'];
+  const GEWITTER_CODES = [95, 96, 99];
+  const isoSek = (s) => { const t = Date.parse(s); return isFinite(t) ? Math.round(t / 1000) : null; };
+
+  /* ---------- Zusatzquellen aufbereiten (Ergebnis wird an die Hauptdaten gehängt) ---------- */
+
+  /** D2-Ensemble: Anteil der Läufe mit mindestens `schwelle` mm je Stunde, in Prozent. */
+  function ensembleAuswerten(antwort, schwelle) {
+    const h = antwort && antwort.hourly;
+    if (!h || !Array.isArray(h.time)) return null;
+    const reihen = Object.keys(h).filter((k) => k === 'precipitation' || k.startsWith('precipitation_member')).map((k) => h[k]);
+    if (!reihen.length) return null;
+    const prob = h.time.map((_, i) => {
+      const w = reihen.map((r) => zahl(r[i])).filter((v) => v !== null);
+      if (w.length < Math.max(2, Math.ceil(reihen.length / 2))) return null;
+      return Math.round((100 * w.filter((v) => v >= schwelle - 1e-9).length) / w.length);
+    });
+    if (!hatWerte(prob)) return null;
+    return { time: h.time.slice(), prob, laeufe: reihen.length };
+  }
+
+  /** DWD-Radar (Bright Sky /radar, format=plain): mm je 5 Minuten am Ort.
+   *  Je Bild zählt der höchste Wert im Umkreis von `umkreis` Pixeln (1 Pixel = 1 km). */
+  function radarAuswerten(antwort, umkreis) {
+    if (!antwort || !Array.isArray(antwort.radar) || !antwort.latlon_position) return null;
+    const px = Math.round(antwort.latlon_position.x);
+    const py = Math.round(antwort.latlon_position.y);
+    const r = umkreis === undefined ? 1 : umkreis;
+    let stand = null;
+    const bilder = [];
+    for (const b of antwort.radar) {
+      const ts = isoSek(b.timestamp);
+      const g = b.precipitation_5;
+      if (ts === null || !Array.isArray(g)) continue;
+      let max = null;
+      for (let y = py - r; y <= py + r; y++) {
+        for (let x = px - r; x <= px + r; x++) {
+          const v = g[y] && zahl(g[y][x]);
+          if (v !== null && v !== undefined && (max === null || v > max)) max = v;
+        }
+      }
+      if (max === null) continue;
+      bilder.push({ ts, mm: max / 100 });
+      // Quelle „RADARCOMP::RV::<Zeit>“: Zeit der letzten Messung; spätere Bilder sind Vorhersage
+      const q = String(b.source || '').split('::').pop();
+      const qs = isoSek(q);
+      if (qs !== null && (stand === null || qs > stand)) stand = qs;
+    }
+    if (!bilder.length) return null;
+    bilder.sort((a, b) => a.ts - b.ts);
+    return { stand, bilder };
+  }
+
+  /** DWD-Stationsvorhersage MOSMIX (Bright Sky /weather) als Vergleichsmodell (Regen der vorangegangenen Stunde). */
+  function mosmixAuswerten(antwort, name) {
+    if (!antwort || !Array.isArray(antwort.weather)) return null;
+    const quellen = new Map((antwort.sources || []).map((s) => [s.id, s]));
+    const time = [];
+    const precipitation = [];
+    let station = null;
+    for (const w of antwort.weather) {
+      const q = quellen.get(w.source_id);
+      if (!q || q.observation_type !== 'forecast') continue;
+      const ts = isoSek(w.timestamp);
+      if (ts === null) continue;
+      time.push(ts);
+      precipitation.push(zahl(w.precipitation));
+      station = station || q.station_name;
+    }
+    if (!hatWerte(precipitation)) return null;
+    return { name, station, hourly: { time, precipitation } };
+  }
+
+  /** Amtliche DWD-Warnungen (Bright Sky /alerts) vereinfachen und einordnen. */
+  function warnungenAuswerten(antwort) {
+    if (!antwort || !Array.isArray(antwort.alerts)) return null;
+    const art = (ev) => {
+      const e = String(ev || '').toUpperCase();
+      if (/GEWITTER|HAGEL/.test(e)) return 'gewitter';
+      if (/GLÄTTE|GLATTEIS|GLATT/.test(e)) return 'glaette';
+      if (/STURM|ORKAN/.test(e)) return 'wind';
+      if (/STARKREGEN|DAUERREGEN|UNWETTER/.test(e)) return 'regen';
+      return null; // z. B. Frost, Nebel, Hitze: nur Hinweis, keine eigene Ampelwirkung
+    };
+    return {
+      ort: antwort.location ? antwort.location.name : null,
+      liste: antwort.alerts.filter((a) => a.status !== 'test').map((a) => ({
+        ereignis: a.event_de || a.event_en || 'Warnung',
+        titel: a.headline_de || a.headline_en || '',
+        stufe: a.severity || null,
+        von: isoSek(a.onset),
+        bis: isoSek(a.expires),
+        art: art(a.event_de || a.event_en),
+      })),
+    };
+  }
+
+  /** Warnungen, die die Stunde [ts, ts+3600) berühren. */
+  function warnungenFuer(ts, warnungen) {
+    if (!warnungen || !warnungen.liste) return [];
+    return warnungen.liste.filter((w) => (w.von === null || w.von < ts + 3600) && (w.bis === null || w.bis > ts));
+  }
 
   function indexVon(zeiten) {
     const m = new Map();
@@ -68,6 +172,17 @@
       .filter((v) => v && v.hourly && Array.isArray(v.hourly.time) && Array.isArray(v.hourly.precipitation))
       .map((v) => ({ name: v.name, idx: indexVon(v.hourly.time), mm: v.hourly.precipitation }));
 
+    // DWD-Stationsvorhersage (MOSMIX) zählt wie ein weiteres Vergleichsmodell
+    if (daten.mosmix && daten.mosmix.hourly) {
+      vergleich.push({ name: daten.mosmix.name || 'DWD', idx: indexVon(daten.mosmix.hourly.time), mm: daten.mosmix.hourly.precipitation });
+    }
+    const ens = daten.ensemble && Array.isArray(daten.ensemble.time) ? daten.ensemble : null;
+    const ensIdx = ens ? indexVon(ens.time) : null;
+    const radar = daten.radar && Array.isArray(daten.radar.bilder) ? daten.radar : null;
+    const radarIdx = radar ? new Map(radar.bilder.map((b) => [b.ts, b.mm])) : null;
+    const nassCfg = cfg.nasseStrasse || null;
+    const glCfg = cfg.glaette || null;
+
     let start = null;
     for (const t of zeiten) if (t <= jetztSek) start = t;
     if (start === null) return [];
@@ -76,6 +191,7 @@
       const i = hIdx.get(t);
       return arr && i !== undefined ? zahl(arr[i]) : null;
     };
+    const maxVon = (...w) => { const z = w.filter((v) => v !== null); return z.length ? Math.max(...z) : null; };
     // Werte so runden, wie sie angezeigt werden – damit Farbe und Zahl immer zusammenpassen
     const rund = (v, stellen) => (v === null ? null : Math.round(v * 10 ** stellen) / 10 ** stellen);
 
@@ -119,9 +235,11 @@
         windKmh: rund(hole(h.wind_speed_10m, ts), 0),
         boeenKmh: rund(hole(h.wind_gusts_10m, vor), 0),
         windRichtung: hole(h.wind_direction_10m, ts),
+        regenProzentQuelle: 'ICON-EPS',
+        radar: false,
       };
 
-      // Einigkeit der Modelle beim Regen (Hauptmodell + Vergleichsmodelle)
+      // Einigkeit der Modelle beim Regen (Hauptmodell + Vergleichsmodelle) – Modellwerte, vor dem Radar
       const modelle = [];
       if (sp.regenMm !== null) modelle.push({ name: 'ICON', mm: sp.regenMm });
       for (const v of vergleich) {
@@ -132,12 +250,52 @@
       sp.modelle = modelle;
       sp.modellStatus = modellStatus(modelle.map((x) => x.mm), cfg);
 
+      // Regenwahrscheinlichkeit aus dem feinen D2-Ensemble (20 Läufe, 2 km), sonst ICON-EPS von Open-Meteo
+      if (ensIdx && ensIdx.has(vor)) {
+        const p = zahl(ens.prob[ensIdx.get(vor)]);
+        if (p !== null) { sp.regenProzent = p; sp.regenProzentQuelle = 'D2-Ensemble'; }
+      }
+
+      // Radar (gemessen + 2-Stunden-Vorschau): ersetzt Regen der Stunde, wenn alle 12 Bilder da sind
+      if (radarIdx) {
+        const fuenf = [];
+        for (let k = 1; k <= 12; k++) fuenf.push(radarIdx.has(ts + k * 300) ? radarIdx.get(ts + k * 300) : null);
+        if (fuenf.every((v) => v !== null)) {
+          const summe = (a) => Math.round(a.reduce((s, v) => s + v, 0) * 100) / 100;
+          sp.radar = true;
+          sp.radarGemessen = radar.stand !== null && ts + 3600 <= radar.stand;
+          sp.regenMm = summe(fuenf);
+          sp.viertel = [0, 1, 2, 3].map((q) => summe(fuenf.slice(q * 3, q * 3 + 3)));
+          sp.regenDauerMin = sp.viertel.filter((v) => v >= cfg.regenSchwelle - 1e-9).length * 15;
+        }
+      }
+
+      // Gewitter: Wettercode 95/96/99 (ICON) und Blitzpotenzial (nur ICON-D2), je Stunde das Stärkere
+      const code = maxVon(hole(h.weather_code, ts), hole(h.weather_code, vor));
+      sp.gewitterCode = code !== null && GEWITTER_CODES.includes(code);
+      sp.blitz = maxVon(hole(h.lightning_potential, ts), hole(h.lightning_potential, vor));
+      sp.schnee = hole(h.snowfall, vor);
+
+      // Nasse Straße: Regen in den 2 Stunden vor dieser Stunde (Zeitstempel ts und ts−1h)
+      const vorher = [hole(h.precipitation, ts), hole(h.precipitation, ts - 3600)];
+      sp.regenVorher = vorher.some((v) => v !== null) ? Math.round(vorher.reduce((s, v) => s + (v || 0), 0) * 10) / 10 : null;
+      sp.strasseNass = !!(nassCfg && sp.regenVorher !== null && sp.regenVorher >= nassCfg.mm - 1e-9);
+
+      // Glätte: kalt (Lufttemperatur) und nass, oder Schneefall
+      const tLuft = hole(h.temperature_2m, ts);
+      sp.glaette = !!(glCfg && tLuft !== null && tLuft <= glCfg.tempMax &&
+        (sp.strasseNass || (sp.regenMm !== null && sp.regenMm >= cfg.regenSchwelle - 1e-9) || (sp.schnee !== null && sp.schnee > 0)));
+
+      // Amtliche Warnungen des DWD für den Ort
+      sp.warnungen = warnungenFuer(ts, daten.warnungen);
+
       const b = bewertung(sp, cfg);
       sp.stufe = b.stufe;
       sp.ursachen = b.ursachen;
       sp.zellen = b.zellen;
-      // „Besonders gut“ braucht sicheres Trockenwetter: bei Uneinigkeit nur normal grün
-      if (sp.stufe === 'top' && sp.modellStatus === 'uneinig') { sp.stufe = 'gruen'; sp.topAbgewertet = true; }
+      // „Besonders gut“ braucht sicheres Trockenwetter: bei Uneinigkeit nur normal grün (Radar sticht Modelle)
+      sp.unsicher = sp.modellStatus === 'uneinig' && !sp.radar;
+      if (sp.stufe === 'top' && sp.unsicher) { sp.stufe = 'gruen'; sp.topAbgewertet = true; }
       spalten.push(sp);
     }
     return spalten;
@@ -161,13 +319,26 @@
     };
     const z = {
       regenMm: hoch(sp.regenMm, r.regenMm, y.regenMm),
-      regenProzent: hoch(sp.regenProzent, r.regenProzent, y.regenProzent),
+      // In Radar-Stunden zählt die Messung bzw. Radar-Vorschau, nicht die Modell-Wahrscheinlichkeit
+      regenProzent: sp.radar ? null : hoch(sp.regenProzent, r.regenProzent, y.regenProzent),
       regenDauer: sp.regenDauerMin !== null && sp.regenDauerMin !== undefined && y.regenDauerMin !== undefined && sp.regenDauerMin >= y.regenDauerMin ? 'gelb' : null,
       wind: hoch(sp.windKmh, r.windKmh, y.windKmh),
       boeen: hoch(sp.boeenKmh, r.boeenKmh, y.boeenKmh),
       temp: null,
       gefuehlt: null,
+      gewitter: sp.gewitterCode ? 'rot'
+        : (y.blitzJkg !== undefined && sp.blitz !== null && sp.blitz !== undefined && sp.blitz >= y.blitzJkg ? 'gelb' : null),
+      nass: sp.strasseNass ? 'gelb' : null,
+      glaette: sp.glaette ? 'rot' : null,
+      warnung: null,
     };
+    // Amtliche Warnungen: Gewitter, Glätte, Sturm, Starkregen machen die Stunde rot
+    for (const w of sp.warnungen || []) {
+      if (!w.art) continue;
+      if (w.art === 'gewitter') z.gewitter = 'rot';
+      else if (w.art === 'glaette') z.glaette = 'rot';
+      else z.warnung = 'rot';
+    }
     // Temperatur: gefühlte Temperatur ist die Grundlage, sonst die Lufttemperatur
     const gef = sp.gefuehltC !== null && sp.gefuehltC !== undefined;
     const wert = gef ? sp.gefuehltC : sp.temp;
@@ -225,7 +396,7 @@
         return {
           von: l.von, bis: l.bis, stunden: l.bis - l.von + 1, tag: spalten[l.von].tag,
           top: teil.filter((s) => s.stufe === 'top').length,
-          unsicher: teil.filter((s) => s.modellStatus === 'uneinig').length,
+          unsicher: teil.filter((s) => (s.unsicher !== undefined ? s.unsicher : s.modellStatus === 'uneinig')).length,
         };
       })
       .filter((l) => l.stunden >= mindest);
@@ -250,24 +421,117 @@
   }
 
   /** Trocken bis wann / Regen bis wann (aus den Viertelstundenwerten des Hauptmodells). */
-  function regenAusblick(daten, jetztSek, cfg) {
+  function regenAusblickModell(daten, abSek, jetztSek, cfg) {
     const m = daten.minutely_15;
     if (!m || !Array.isArray(m.time) || !Array.isArray(m.precipitation)) return null;
     const schwelle = cfg.regenSchwelle - 1e-9;
     const nass = (i) => { const v = zahl(m.precipitation[i]); return v !== null && v >= schwelle; };
-    const i0 = m.time.findIndex((t) => t > jetztSek); // laufende Viertelstunde
+    const i0 = m.time.findIndex((t) => t > abSek); // laufende Viertelstunde
     if (i0 < 0) return null;
     const ende = jetztSek + cfg.stunden * 3600;
     if (nass(i0)) {
       let j = i0;
       while (j + 1 < m.time.length && nass(j + 1)) j++;
-      return { status: 'regnet', bis: m.time[j], offen: j === m.time.length - 1 };
+      return { status: 'regnet', bis: m.time[j], offen: j === m.time.length - 1, quelle: 'ICON' };
     }
     for (let j = i0; j < m.time.length; j++) {
       if (m.time[j] - 900 > ende) break;
-      if (nass(j)) return { status: 'trocken', bis: m.time[j] - 900 };
+      if (nass(j)) return { status: 'trocken', bis: Math.max(abSek, m.time[j] - 900), quelle: 'ICON' };
     }
-    return { status: 'kein-regen', bis: Math.min(ende, m.time[m.time.length - 1]) };
+    return { status: 'kein-regen', bis: Math.min(ende, m.time[m.time.length - 1]), quelle: 'ICON' };
+  }
+
+  /** Trocken bis wann / Regen bis wann: zuerst DWD-Radar (gemessen + 2 Std. Vorschau), danach ICON-Viertelstunden. */
+  function regenAusblick(daten, jetztSek, cfg) {
+    const radar = daten.radar && Array.isArray(daten.radar.bilder) ? daten.radar : null;
+    const rcfg = cfg.radar || {};
+    const bilder = radar ? radar.bilder.filter((b) => b.ts > jetztSek) : [];
+    // Radar nur, wenn das laufende 5-Minuten-Bild dabei ist (sonst veraltet)
+    if (!bilder.length || bilder[0].ts - jetztSek > 600) return regenAusblickModell(daten, jetztSek, jetztSek, cfg);
+    const nass = (b) => b.mm >= (rcfg.nassMm5 || 0.02) - 1e-9;
+    const radarEnde = bilder[bilder.length - 1].ts;
+    if (nass(bilder[0])) {
+      let j = 0;
+      while (j + 1 < bilder.length && nass(bilder[j + 1])) j++;
+      if (j < bilder.length - 1) return { status: 'regnet', bis: bilder[j].ts, offen: false, quelle: 'Radar' };
+      // Regen bis zum Ende der Radar-Vorschau: das Modell entscheidet über das Ende
+      const m = regenAusblickModell(daten, radarEnde, jetztSek, cfg);
+      if (m && m.status === 'regnet') return { ...m, quelle: 'Radar + ICON' };
+      return { status: 'regnet', bis: radarEnde, offen: false, mindestens: true, quelle: 'Radar' };
+    }
+    const erstesNass = bilder.find(nass);
+    if (erstesNass) return { status: 'trocken', bis: erstesNass.ts - 300, quelle: 'Radar' };
+    const m = regenAusblickModell(daten, radarEnde, jetztSek, cfg);
+    if (!m) return { status: 'trocken', bis: radarEnde, mindestens: true, quelle: 'Radar' };
+    if (m.status === 'regnet') return { status: 'trocken', bis: radarEnde, quelle: 'Radar + ICON' };
+    return { ...m, quelle: 'Radar + ICON' };
+  }
+
+  /* ---------- Treffsicherheit: Vorhersage vom Vortag gegen DWD-Messung ---------- */
+
+  /** Messwerte (Bright Sky /weather, nur gemessene Quellen) nach Zeitstempel. */
+  function messungenAuswerten(antwort) {
+    if (!antwort || !Array.isArray(antwort.weather)) return null;
+    const quellen = new Map((antwort.sources || []).map((s) => [s.id, s]));
+    const m = new Map();
+    const stationen = new Set();
+    for (const w of antwort.weather) {
+      const q = quellen.get(w.source_id);
+      if (!q || q.observation_type === 'forecast') continue;
+      const ts = isoSek(w.timestamp);
+      if (ts === null) continue;
+      m.set(ts, { regenMm: zahl(w.precipitation), windKmh: zahl(w.wind_speed), boeenKmh: zahl(w.wind_gust_speed), temp: zahl(w.temperature) });
+      stationen.add(q.station_name);
+      if (w.fallback_source_ids) for (const id of Object.values(w.fallback_source_ids)) { const f = quellen.get(id); if (f) stationen.add(f.station_name); }
+    }
+    return { werte: m, stationen: [...stationen] };
+  }
+
+  /** Vergleich je Tageslicht-Stunde: Ampel aus der Vorhersage vom Vortag gegen Ampel aus den Messwerten.
+   *  Bewertet werden Regen-Menge, Wind, Böen und Lufttemperatur (Wahrscheinlichkeit und Regendauer gibt es gemessen nicht). */
+  function treffsicherheit(vorhersage, messung, jetztSek, cfg) {
+    const h = vorhersage && vorhersage.hourly;
+    if (!h || !Array.isArray(h.time) || !messung || !messung.werte) return null;
+    const idx = indexVon(h.time);
+    const get = (feld, t) => { const i = idx.get(t); return h[feld] && i !== undefined ? zahl(h[feld][i]) : null; };
+    const rund0 = (v) => (v === null ? null : Math.round(v));
+    const klasse = (s) => (s === 'top' ? 'gruen' : s);
+    const RANG = { gruen: 0, gelb: 1, rot: 2 };
+    const erg = { stunden: 0, gleich: 0, zuGut: 0, zuSchlecht: 0, regenStunden: 0, regenRichtig: 0, regenVerpasst: 0, regenFehlalarm: 0, regenGemessen: 0, von: null, bis: null, stationen: messung.stationen };
+    for (const ts of h.time) {
+      const vor = ts + 3600;
+      if (vor > jetztSek) break;
+      if (!istTag(ts, vorhersage)) continue;
+      const mT = messung.werte.get(ts);
+      const mV = messung.werte.get(vor);
+      if (!mV || mV.regenMm === null) continue;
+      const f = {
+        regenMm: get('precipitation_previous_day1', vor), regenProzent: null, regenDauerMin: null,
+        windKmh: rund0(get('wind_speed_10m_previous_day1', ts)), boeenKmh: rund0(get('wind_gusts_10m_previous_day1', vor)),
+        temp: rund0(get('temperature_2m_previous_day1', ts)), gefuehltC: null,
+      };
+      if (f.regenMm === null) continue;
+      const o = {
+        regenMm: mV.regenMm, regenProzent: null, regenDauerMin: null,
+        windKmh: rund0(mV.windKmh), boeenKmh: rund0(mV.boeenKmh), temp: rund0(mT ? mT.temp : null), gefuehltC: null,
+      };
+      const sf = klasse(bewertung(f, cfg).stufe);
+      const so = klasse(bewertung(o, cfg).stufe);
+      erg.stunden++;
+      if (sf === so) erg.gleich++;
+      else if (RANG[sf] < RANG[so]) erg.zuGut++;
+      else erg.zuSchlecht++;
+      const fn = f.regenMm >= cfg.regenSchwelle - 1e-9;
+      const on = o.regenMm >= cfg.regenSchwelle - 1e-9;
+      erg.regenStunden++;
+      if (fn === on) erg.regenRichtig++;
+      else if (on) erg.regenVerpasst++;
+      else erg.regenFehlalarm++;
+      if (on) erg.regenGemessen++;
+      if (erg.von === null) erg.von = ts;
+      erg.bis = ts;
+    }
+    return erg.stunden ? erg : null;
   }
 
   /** Ergänzt fehlende Teile der Hauptantwort a aus der Antwort b (ohne Modellwahl). */
@@ -303,6 +567,8 @@
   const api = {
     baueSpalten, bewerte, bewertung, zellenBewerten, modellStatus, besteZeit, fensterProTag,
     regenAusblick, ergaenze, brauchtErgaenzung, istTag, hatWerte, lokaleStunde, lokalerTag,
+    ensembleAuswerten, radarAuswerten, mosmixAuswerten, warnungenAuswerten, warnungenFuer,
+    messungenAuswerten, treffsicherheit,
   };
   root.RadlLogik = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
