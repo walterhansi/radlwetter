@@ -1,7 +1,7 @@
 /* Radlwetter – Einstellungen. Hier stehen alle Grenzwerte und Vorgaben. */
 const RADL_CONFIG = {
   // Wird bei jeder Änderung hochgezählt; der Service Worker nutzt sie als Cache-Name.
-  version: '1.4.0',
+  version: '1.4.1',
 
   // Standard-Ort (im Programm per Ortswahl änderbar)
   ort: { name: 'Moosburg', lat: 48.47, lon: 11.94 },

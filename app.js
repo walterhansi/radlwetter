@@ -537,12 +537,14 @@
     const radAmpel = el('span', 'radampel');
     radAmpel.appendChild(radSymbol());
     const mini = document.createElementNS(NS, 'svg');
-    mini.setAttribute('viewBox', '0 0 12 30');
+    mini.setAttribute('viewBox', '0 0 12 39');
     mini.setAttribute('class', 'miniampel');
     mini.setAttribute('aria-hidden', 'true');
-    mini.innerHTML = '<rect x="0.5" y="0.5" width="11" height="29" rx="4" fill="#0d1424" stroke="rgba(255,255,255,.55)"/>' +
+    // Rot, Gelb, Grün und ganz unten Dunkelgrün mit weißem Ring = „besonders gut“ (wie in der Tabelle)
+    mini.innerHTML = '<rect x="0.5" y="0.5" width="11" height="38" rx="4" fill="#0d1424" stroke="rgba(255,255,255,.55)"/>' +
       '<circle cx="6" cy="6.3" r="3.6" fill="var(--rot)"/><circle cx="6" cy="15" r="3.6" fill="var(--gelb)"/>' +
-      '<circle cx="6" cy="23.7" r="3.6" fill="var(--gruen)"/>';
+      '<circle cx="6" cy="23.7" r="3.6" fill="var(--gruen)"/>' +
+      '<circle cx="6" cy="32.4" r="3.2" fill="var(--gruen-dunkel)" stroke="#fff" stroke-width="1.2"/>';
     radAmpel.appendChild(mini);
     const radKopf = beschriftung('', '', radAmpel, 'Eignung fürs Rennrad');
     radKopf.firstChild.setAttribute('aria-label', 'Eignung fürs Rennrad');

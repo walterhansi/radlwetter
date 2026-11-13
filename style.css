@@ -243,12 +243,12 @@ dialog#erklDlg { width: min(640px, calc(100vw - 24px)); }
 
 /* v1.4: kleine Ampel neben dem Rennrad */
 .radampel { display: inline-flex; align-items: center; gap: 6px; }
-.lbl svg.miniampel { width: 12px; height: 30px; display: block; }
+.lbl svg.miniampel { width: 12px; height: 39px; display: block; }
 
 /* v1.3: Schauer im Umkreis */
 .nahtext { display: block; margin-top: 2px; font-size: .95rem; color: #fff; }
 .nahtext .nah-sym { width: 18px; height: 18px; vertical-align: -3px; margin-right: 6px; color: var(--gelb); }
 @media (max-width: 520px) {
-  .lbl svg.miniampel { width: 10px; height: 25px; }
+  .lbl svg.miniampel { width: 10px; height: 32px; }
   .radampel { gap: 4px; }
 }
