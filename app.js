@@ -540,7 +540,9 @@
       zahlZelle('regenMm', mm, 'regenMm')(td, sp);
       if (sp.regenMm !== null && sp.regenMm > 0) td.classList.add('nass');
       if (sp.radar) {
-        td.classList.add('radar');
+        const r = el('span', 'rq', 'R');
+        r.setAttribute('aria-label', 'Radar');
+        td.appendChild(r);
         td.title = sp.radarGemessen ? 'DWD-Radar: gemessen' : 'DWD-Radar: Vorschau (bis 2 Stunden)';
       }
     });

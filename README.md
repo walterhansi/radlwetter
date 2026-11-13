@@ -15,7 +15,7 @@ Oben: amtliche DWD-Warnungen für den Ort (falls vorhanden), „Trocken bis …�
 Tabelle (von oben nach unten):
 
 1. **Rennrad** – Ampel; darunter kleine Symbole, **warum** gelb oder rot (Gewitter, Warnung, Regen, Glätte, nasse Straße, Wind, Temperatur); „?“ = Modelle uneinig
-2. Regen mm – türkis unterstrichen = Wert vom DWD-Radar (gemessen oder 2-Std.-Vorschau)
+2. Regen mm – kleines „R“ = Wert vom DWD-Radar (gemessen oder 2-Std.-Vorschau); die Farbe der Zahl (gelb/rot) zeigt wie immer die Menge
 3. Regendauer – Viertelstunden-Balken plus Minuten
 4. Regen % – Anteil der 20 Läufe des D2-Ensembles mit Regen (danach ICON-EPS)
 5. Modelle (Regen) – Vergleich ICON / ECMWF / GFS / DWD-Stationsvorhersage
