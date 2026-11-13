@@ -679,7 +679,20 @@
       mh.classList.add('warn');
       mh.appendChild(el('span', 'badge inline', '?'));
       mh.appendChild(el('b', null, 'Regen unsicher: '));
-      mh.append('Die Wettermodelle (' + namen.join(', ') + ') sind sich in ' + uneinig + (uneinig === 1 ? ' Stunde' : ' Stunden') + ' uneinig (mit ? markiert).' +
+      // betroffene Stunden direkt nennen, zusammengefasst zu Zeiträumen je Tag
+      const bereiche = [];
+      spalten.forEach((s, i) => {
+        if (!s.unsicher) return;
+        const letzter = bereiche[bereiche.length - 1];
+        if (letzter && letzter.tag === s.tag && letzter.bisTs + 3600 === s.ts) { letzter.bis = s.stunde; letzter.bisTs = s.ts; }
+        else bereiche.push({ tag: s.tag, von: s.stunde, bis: s.stunde, bisTs: s.ts, sp: s });
+      });
+      const wann = bereiche.map((b) => {
+        const t = tagWort(b.tag, heute, b.sp.wochentag, b.sp.datum);
+        return (t === 'Heute' ? 'heute' : t === 'Morgen' ? 'morgen' : t) + ' ' + b.von + '–' + ((b.bis + 1) % 24) + ' Uhr';
+      }).join(', ');
+      mh.append('Die Wettermodelle (' + namen.join(', ') + ') sind sich uneinig: ' + wann +
+        '. Diese Stunden tragen ein gelbes ? oben rechts an der Ampel (Tabelle ggf. nach rechts schieben).' +
         (fehlt.length ? ' Ohne ' + fehlt.join(', ') + ' (nicht abrufbar).' : ''));
     } else {
       mh.textContent = 'Die Wettermodelle (' + namen.join(', ') + ') sind sich beim Regen einig.' +
