@@ -1,7 +1,7 @@
 /* Radlwetter – Einstellungen. Hier stehen alle Grenzwerte und Vorgaben. */
 const RADL_CONFIG = {
   // Wird bei jeder Änderung hochgezählt; der Service Worker nutzt sie als Cache-Name.
-  version: '1.4.7',
+  version: '1.4.8',
 
   // Standard-Ort (im Programm per Ortswahl änderbar)
   ort: { name: 'Moosburg', lat: 48.47, lon: 11.94 },
@@ -22,7 +22,7 @@ const RADL_CONFIG = {
   ],
 
   // DWD-Stationsvorhersage (MOSMIX über Bright Sky) als weiteres Vergleichsmodell beim Regen.
-  // Bright Sky wählt die nächste Vorhersagestation (für Moosburg: Nandlstadt, ca. 10 km).
+  // Bright Sky wählt die nächste Vorhersagestation zum gewählten Ort (für Moosburg: Nandlstadt, ca. 10 km).
   dwdVergleich: true,
 
   // Regenwahrscheinlichkeit aus dem DWD-Ensemble ICON-D2-EPS (20 Läufe, 2 km, 48 Std.).

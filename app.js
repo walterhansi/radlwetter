@@ -666,7 +666,7 @@
     // 4) Einigkeit der Wettermodelle beim Regen – deutlich sichtbar
     const mh = $('modellhinweis');
     const namen = ['ICON'].concat((st.daten.vergleich || []).map((v) => v.name));
-    if (st.daten.mosmix) namen.push('DWD ' + (st.daten.mosmix.station ? stationName(st.daten.mosmix.station) : 'Station'));
+    if (st.daten.mosmix) namen.push(dwdStationText(st.daten.mosmix));
     const fehlt = (st.daten.vergleichFehlt || []).concat(st.daten.zusatzFehlt || []);
     const uneinig = spalten.filter((s) => s.unsicher).length;
     mh.className = 'modellhinweis';
@@ -697,6 +697,14 @@
         (fehlt.length ? ' Ohne ' + fehlt.join(', ') + ' (nicht abrufbar).' : '');
     }
   }
+
+  /** „DWD Nandlstadt (10 km)“ – Name und Entfernung der Vorhersagestation zum gewählten Ort */
+  const dwdStationText = (m) => 'DWD ' + (m.station ? stationName(m.station) : 'Station') +
+    (m.entfernungKm !== null && m.entfernungKm !== undefined ? ' (' + m.entfernungKm + ' km)' : '');
+
+  /** „Station Nandlstadt, 10 km entfernt“ */
+  const stationMitEntfernung = (m) => 'Station ' + (m.station ? stationName(m.station) : 'unbekannt') +
+    (m.entfernungKm !== null && m.entfernungKm !== undefined ? ', ' + m.entfernungKm + ' km entfernt' : '');
 
   /** „NANDLSTADT“ -> „Nandlstadt“ */
   const stationName = (n) => String(n).toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
@@ -798,7 +806,9 @@
       'Wettermodell ICON des Deutschen Wetterdienstes, in den ersten 2 Tagen mit 2 km feinem Raster.',
       'Regenwahrscheinlichkeit: Das feine Modell wird 20-mal mit leicht veränderten Startwerten gerechnet. Zeigen 5 der 20 Läufe Regen, steht dort 25 %.',
       'Nächste 2 Stunden: Statt des Modells zählt das DWD-Regenradar (gemessen und Vorschau, Kennzeichen „R“). Dort zählt die Regenwahrscheinlichkeit nicht.',
-      'Gegenprobe: Die Modelle ECMWF (Europa), GFS (USA) und die DWD-Vorhersage für Nandlstadt werden beim Regen verglichen. Widersprechen sie sich, steht ein „?“ in der Zeile „Modelle“.',
+      'Gegenprobe: Die Modelle ECMWF (Europa), GFS (USA) und die DWD-Vorhersage der nächsten Wetterstation zu „' + st.ort.name + '“ werden beim Regen verglichen' +
+        (st.daten && st.daten.mosmix ? ' (zurzeit ' + stationMitEntfernung(st.daten.mosmix) + ')' : ' (nur in Deutschland)') +
+        '. Je weiter die Station weg ist, desto weniger sagt sie über deinen Ort. Widersprechen sich die Modelle, steht ein „?“ in der Zeile „Modelle“.',
     ]);
     abschnitt('Symbole unter der Ampel', null, 'Sie zeigen den Grund für Gelb oder Rot: Tropfen = Regen, Tropfen im Kreis = Schauer in der Nähe, Wind, Thermometer = Temperatur, Blitz = Gewitter, Schneeflocke = Glätte, Tropfen über Straße = nasse Straße, Dreieck = DWD-Warnung.');
     abschnitt('Treffsicherheit', null, 'Die App vergleicht laufend, was das Modell 24 Stunden vorher für die letzten ' + CFG.treffsicherheit.tage +

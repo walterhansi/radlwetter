@@ -100,6 +100,7 @@
     const time = [];
     const precipitation = [];
     let station = null;
+    let entfernungKm = null;
     for (const w of antwort.weather) {
       const q = quellen.get(w.source_id);
       if (!q || q.observation_type !== 'forecast') continue;
@@ -107,10 +108,14 @@
       if (ts === null) continue;
       time.push(ts);
       precipitation.push(zahl(w.precipitation));
-      station = station || q.station_name;
+      if (!station) {
+        station = q.station_name || null;
+        const d = zahl(q.distance);
+        entfernungKm = d === null ? null : Math.round(d / 1000);
+      }
     }
     if (!hatWerte(precipitation)) return null;
-    return { name, station, hourly: { time, precipitation } };
+    return { name, station, entfernungKm, hourly: { time, precipitation } };
   }
 
   /** Amtliche DWD-Warnungen (Bright Sky /alerts) vereinfachen und einordnen. */

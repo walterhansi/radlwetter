@@ -468,8 +468,9 @@ test('DWD-Stationsvorhersage zählt als Vergleichsmodell; in Radar-Stunden kein 
   const weather = [];
   for (let s = 14; s <= 20; s++) weather.push({ timestamp: iso(STD(tag0, s)), source_id: 1, precipitation: s === 17 ? 0.8 : 0 });
   weather.push({ timestamp: iso(STD(tag0, 13)), source_id: 2, precipitation: 5 }); // Messung, nicht Vorhersage
-  daten.mosmix = L.mosmixAuswerten({ sources: [{ id: 1, observation_type: 'forecast', station_name: 'NANDLSTADT' }, { id: 2, observation_type: 'historical' }], weather }, 'DWD');
+  daten.mosmix = L.mosmixAuswerten({ sources: [{ id: 1, observation_type: 'forecast', station_name: 'NANDLSTADT', distance: 9840 }, { id: 2, observation_type: 'historical' }], weather }, 'DWD');
   assert.equal(daten.mosmix.station, 'NANDLSTADT');
+  assert.equal(daten.mosmix.entfernungKm, 10);
   assert.equal(daten.mosmix.hourly.time.length, 7);
   const s16 = spalte(daten, 16);
   assert.equal(s16.modellStatus, 'uneinig');
